@@ -1,0 +1,9 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./packages/engine" },
+    { "path": "./packages/mechanics-standard" },
+    { "path": "./packages/solver" },
+    { "path": "./apps/lab" }
+  ]
+}

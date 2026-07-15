@@ -1,0 +1,9 @@
+{
+  "name": "@lightout/solver",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "dependencies": { "@lightout/engine": "workspace:*" },
+  "devDependencies": { "@lightout/mechanics-standard": "workspace:*" },
+  "exports": "./src/index.ts"
+}

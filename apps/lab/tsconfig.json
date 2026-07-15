@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": { "composite": true, "jsx": "react-jsx" },
+  "references": [
+    { "path": "../../packages/engine" },
+    { "path": "../../packages/mechanics-standard" },
+    { "path": "../../packages/solver" }
+  ],
+  "include": ["src", "vite.config.ts"]
+}
