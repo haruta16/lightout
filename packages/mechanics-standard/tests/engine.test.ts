@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  applyMutations,
   commitHistory,
   createHistory,
   dispatch,
@@ -7,8 +8,14 @@ import {
   stableStateKey,
   undoHistory,
   validateGameState,
+  type GameState,
+  type Ruleset,
 } from "@lightout/engine";
-import { createExperiment, createStandardRegistry } from "../src";
+import {
+  createExperiment,
+  createRectTopology,
+  createStandardRegistry,
+} from "../src";
 
 describe("headless engine with standard mechanics", () => {
   it("restores a binary state when the same switch is activated twice", () => {
@@ -78,5 +85,118 @@ describe("headless engine with standard mechanics", () => {
     expect(validateGameState(initialState, ruleset)).toContain(
       `Entity ${first?.id} has invalid channel value: power`,
     );
+  });
+
+  it("validates dangling node references without an entity schema", () => {
+    const state: GameState = {
+      schemaVersion: 1,
+      board: { nodes: {}, edges: [] },
+      entities: {
+        light: {
+          id: "light",
+          kind: "custom",
+          nodeId: "missing",
+          tags: [],
+          channels: {},
+        },
+      },
+      counters: {},
+      inventory: {},
+      turn: 0,
+      status: "playing",
+      seed: 0,
+    };
+    const ruleset: Ruleset = {
+      id: "schema-free",
+      name: "Schema-free ruleset",
+      actions: [],
+      goals: [],
+      settleSystems: [],
+    };
+
+    expect(validateGameState(state, ruleset)).toContain(
+      "Entity light references unknown node: missing",
+    );
+  });
+
+  it("does not emit movement events for a no-op move", () => {
+    const { initialState } = createExperiment({
+      size: 2,
+      stateCount: 2,
+      goalValue: 0,
+      influence: "cross",
+      boardShape: "full",
+      seed: 1,
+    });
+    const entity = Object.values(initialState.entities)[0];
+    expect(entity?.nodeId).toBeDefined();
+    if (!entity?.nodeId) return;
+
+    const result = applyMutations(initialState, [
+      { type: "move-entity", entityId: entity.id, toNodeId: entity.nodeId },
+    ]);
+    expect(result.events).toEqual([]);
+    expect(result.state.entities[entity.id]?.nodeId).toBe(entity.nodeId);
+  });
+
+  it("keeps entity order stable while gravity settles downward", () => {
+    const registry = createStandardRegistry();
+    const gravity = registry.systems.get("gravity-down");
+    const board = createRectTopology({ width: 1, height: 3 });
+    const state: GameState = {
+      schemaVersion: 1,
+      board,
+      entities: {
+        top: {
+          id: "top",
+          kind: "light",
+          nodeId: "n:0:0",
+          tags: [],
+          channels: { power: 0 },
+        },
+        bottom: {
+          id: "bottom",
+          kind: "light",
+          nodeId: "n:0:1",
+          tags: [],
+          channels: { power: 1 },
+        },
+      },
+      counters: {},
+      inventory: {},
+      turn: 0,
+      status: "playing",
+      seed: 0,
+    };
+
+    expect(gravity).toBeDefined();
+    expect(
+      gravity?.({
+        state,
+        definition: { type: "gravity-down", params: {} },
+        iteration: 0,
+      }),
+    ).toEqual([
+      { type: "move-entity", entityId: "bottom", toNodeId: "n:0:2" },
+      { type: "move-entity", entityId: "top", toNodeId: "n:0:1" },
+    ]);
+  });
+
+  it("never emits an already-completed generated board as playing", () => {
+    const { initialState } = createExperiment({
+      size: 2,
+      stateCount: 2,
+      goalValue: 0,
+      influence: "diagonal",
+      boardShape: "full",
+      seed: 2,
+    });
+
+    expect(initialState.status).toBe("playing");
+    expect(
+      Object.values(initialState.entities).some(
+        (entity) => entity.channels.power !== 0,
+      ),
+    ).toBe(true);
   });
 });

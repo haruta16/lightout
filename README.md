@@ -67,6 +67,21 @@ registerSystem(registry, "gravity-down", gravity);
 4. State Schema 能捕获非法通道或越界值。
 5. Solver 若不支持该规则，必须显式返回 `unsupported`，不能给出伪答案。
 
+## 求解器选择与扩展
+
+UI 只调用统一入口 `solvePuzzle(state, ruleset, mechanics, solvers)`。每个求解器通过
+`supports()` 独立验证规则能力，注册表再按 `priority` 选择最合适的精确算法：
+
+```ts
+const solvers = createDefaultSolverRegistry();
+registerSolver(solvers, customSolver);
+const result = solvePuzzle(state, ruleset, mechanics, solvers);
+```
+
+Ruleset 描述真实机制，不绑定具体求解器名称。新增搜索或专用算法时实现 `PuzzleSolver`
+接口即可，不需要修改 UI 或 Engine。默认注册表包含 GF(p) 质数域求解器和 Z/4Z 模环
+求解器；不满足线性前提的规则会继续尝试其他已注册算法，否则返回 `unsupported`。
+
 ## 当前实现与明确边界
 
 已实现：
@@ -78,12 +93,15 @@ registerSystem(registry, "gravity-down", gravity);
 - 状态快照撤销/重做；
 - 事件日志和影响范围预览；
 - 浅色/夜间主题与圆形/轻圆角矩形节点渲染；
-- 二态规则 GF(2) 求解、秩与自由变量分析；
+- 求解器注册表按规则能力自动选择精确算法；
+- 二、三、五态及其他质数模数规则使用 GF(p) 质数域线性求解；
+- 四态循环使用 Z/4Z 模环线性求解，不错误复用 GF(4)；
+- 求解结果提供约束秩、自由变量与最短性分析，集成测试通过 Engine 重放验证；
 - 可注册的 settle system，并提供重力系统实现作为接口探针。
 
 暂未假装通用：
 
-- 多状态规则不会错误复用 GF(2)，目前明确显示不支持；
+- 带状态相关选择、失败条件或 settle system 的非线性规则会明确显示不支持；
 - 尚未建立万能关卡 DSL，先让机制注册接口稳定；
 - 尚未引入 Phaser；需要验证强动效时新增 renderer，而不修改规则内核；
-- 算法当前计算量很小，尚未搬入 Web Worker。加入通用搜索或批量生成后再隔离线程。
+- 当前精确线性求解保持纯函数和同步执行；加入通用搜索或扩大棋盘后可直接将代数层迁入 Web Worker。

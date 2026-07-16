@@ -52,10 +52,9 @@ export function validateGameState(
   state: Readonly<GameState>,
   ruleset: Readonly<Ruleset>,
 ): string[] {
-  if (!ruleset.entityKinds) return [];
   const errors: string[] = [];
   for (const entity of Object.values(state.entities)) {
-    errors.push(...validateEntity(entity, ruleset));
+    if (ruleset.entityKinds) errors.push(...validateEntity(entity, ruleset));
     if (entity.nodeId && !state.board.nodes[entity.nodeId]) {
       errors.push(`Entity ${entity.id} references unknown node: ${entity.nodeId}`);
     }

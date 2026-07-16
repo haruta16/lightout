@@ -95,11 +95,9 @@ export function createExperiment(config: ExperimentConfig): {
   const relations = relationsFor(config.influence);
   const rng = random(config.seed);
   const entityList = Object.values(initialState.entities);
-  let changed = false;
   for (const anchor of entityList) {
     const presses = Math.floor(rng() * stateCount);
     if (presses === 0) continue;
-    changed = true;
     for (const entityId of affectedEntityIds(initialState, anchor, relations)) {
       const entity = initialState.entities[entityId];
       if (!entity) continue;
@@ -107,7 +105,10 @@ export function createExperiment(config: ExperimentConfig): {
       entity.channels.power = (current + presses) % stateCount;
     }
   }
-  if (!changed && entityList[0]) {
+  const generatedGoalState = entityList.every(
+    (entity) => entity.channels.power === goalValue,
+  );
+  if (generatedGoalState && entityList[0]) {
     for (const entityId of affectedEntityIds(initialState, entityList[0], relations)) {
       const entity = initialState.entities[entityId];
       if (entity) entity.channels.power = (Number(entity.channels.power) + 1) % stateCount;

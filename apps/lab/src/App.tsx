@@ -8,6 +8,7 @@ import {
   resetHistory,
   undoHistory,
   type GameEntity,
+  type GameCommand,
   type GameEvent,
   type HistoryState,
   type Ruleset,
@@ -19,7 +20,10 @@ import {
   type ExperimentConfig,
   type InfluencePattern,
 } from "@lightout/mechanics-standard";
-import { solveBinaryToggle } from "@lightout/solver";
+import {
+  createDefaultSolverRegistry,
+  solvePuzzle,
+} from "@lightout/solver";
 
 const DEFAULT_CONFIG: ExperimentConfig = {
   size: 5,
@@ -80,7 +84,7 @@ interface BoardProps {
   hovered: string | null;
   affected: Set<string>;
   changed: Set<string>;
-  solution: Set<string>;
+  solution: Map<string, number>;
   showSolution: boolean;
   stateCount: number;
   goalValue: number;
@@ -193,10 +197,14 @@ function Board({
               </>
             )}
             {stateCount > 2 && <text className="cell-value" y="5">{value}</text>}
-            {showSolution && solution.has(entity.id) && (
+            {showSolution && (solution.get(entity.id) ?? 0) > 0 && (
               <g className="solution-mark" transform="translate(28 -28)">
                 <circle r="10" />
-                <text y="4">+</text>
+                <text y="4">
+                  {(solution.get(entity.id) ?? 0) === 1
+                    ? "+"
+                    : `×${solution.get(entity.id)}`}
+                </text>
               </g>
             )}
           </g>
@@ -216,6 +224,7 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 
 export function App() {
   const registry = useMemo(() => createStandardRegistry(), []);
+  const solverRegistry = useMemo(() => createDefaultSolverRegistry(), []);
   const [config, setConfig] = useState<ExperimentConfig>(DEFAULT_CONFIG);
   const firstExperiment = useMemo(() => createExperiment(DEFAULT_CONFIG), []);
   const [ruleset, setRuleset] = useState(firstExperiment.ruleset);
@@ -236,8 +245,8 @@ export function App() {
   });
 
   const solver = useMemo(
-    () => solveBinaryToggle(history.present, ruleset, registry),
-    [history.present, ruleset, registry],
+    () => solvePuzzle(history.present, ruleset, registry, solverRegistry),
+    [history.present, ruleset, registry, solverRegistry],
   );
   const affected = useMemo(() => {
     if (!hovered) return new Set<string>();
@@ -250,7 +259,13 @@ export function App() {
       ),
     );
   }, [history.present, hovered, registry, ruleset, tool]);
-  const solution = useMemo(() => new Set(solver.presses), [solver.presses]);
+  const solution = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const entityId of solver.presses) {
+      counts.set(entityId, (counts.get(entityId) ?? 0) + 1);
+    }
+    return counts;
+  }, [solver.presses]);
 
   useEffect(() => {
     if (changed.size === 0) return;
@@ -290,15 +305,7 @@ export function App() {
     rebuild({ ...config, [key]: value });
   }
 
-  function runCommand(entity: GameEntity): void {
-    const command =
-      tool === "activate"
-        ? { type: "activate", anchorEntityId: entity.id }
-        : {
-            type: "set-state",
-            anchorEntityId: entity.id,
-            payload: { value: config.goalValue },
-          };
+  function executeCommand(command: GameCommand): void {
     const source =
       history.present.status === "playing"
         ? history.present
@@ -315,6 +322,18 @@ export function App() {
     if (result.accepted) setHistory((current) => commitHistory(current, result.state));
   }
 
+  function runCommand(entity: GameEntity): void {
+    executeCommand(
+      tool === "activate"
+        ? { type: "activate", anchorEntityId: entity.id }
+        : {
+            type: "set-state",
+            anchorEntityId: entity.id,
+            payload: { value: config.goalValue },
+          },
+    );
+  }
+
   function restart(): void {
     setHistory(resetHistory(initialState));
     setEvents([]);
@@ -322,10 +341,21 @@ export function App() {
     setShowSolution(false);
   }
 
+  function undo(): void {
+    setHistory((value) => undoHistory(value));
+    setEvents([]);
+    setChanged(new Set());
+  }
+
+  function redo(): void {
+    setHistory((value) => redoHistory(value));
+    setEvents([]);
+    setChanged(new Set());
+  }
+
   function applyHint(): void {
     const first = solver.presses[0];
-    const entity = first ? history.present.entities[first] : undefined;
-    if (entity) runCommand(entity);
+    if (first) executeCommand({ type: "activate", anchorEntityId: first });
   }
 
   const activeCount = Object.values(history.present.entities).filter(
@@ -515,8 +545,8 @@ export function App() {
           </div>
 
           <div className="timeline-bar">
-            <button disabled={history.past.length === 0} onClick={() => setHistory((value) => undoHistory(value))}>← 撤销</button>
-            <button disabled={history.future.length === 0} onClick={() => setHistory((value) => redoHistory(value))}>重做 →</button>
+            <button disabled={history.past.length === 0} onClick={undo}>← 撤销</button>
+            <button disabled={history.future.length === 0} onClick={redo}>重做 →</button>
             <div className="timeline-spacer" />
             <button onClick={restart}>重置局面</button>
           </div>
@@ -526,16 +556,23 @@ export function App() {
           <SectionLabel>分析</SectionLabel>
           <div className={`solver-card solver-${solver.status}`}>
             <div className="solver-title">
-              <div><small>求解器</small><strong>GF(2) 线性求解</strong></div>
+              <div>
+                <small>求解器 · 自动选择</small>
+                <strong>
+                  {solver.status === "unsupported"
+                    ? "没有兼容的精确求解器"
+                    : solver.solverName}
+                </strong>
+              </div>
             </div>
             {solver.status === "solved" ? (
               <>
                 <div className="solver-number"><strong>{solver.presses.length}</strong><span>步参考解</span></div>
                 <div className="metric-grid">
-                  <span>矩阵秩<b>{solver.rank}</b></span>
-                  <span>自由变量<b>{solver.freeVariables}</b></span>
+                  <span>约束秩<b>{solver.rank}</b></span>
+                  <span>自由度<b>{solver.freeVariables}</b></span>
                   <span>最短保证<b>{solver.minimal ? "是" : "否"}</b></span>
-                  <span>状态空间<b>2^{nodeCount}</b></span>
+                  <span>状态空间<b>{solver.modulus}^{nodeCount}</b></span>
                 </div>
                 <div className="solver-actions">
                   <button onClick={() => setShowSolution((value) => !value)}>{showSolution ? "隐藏解标记" : "显示解标记"}</button>

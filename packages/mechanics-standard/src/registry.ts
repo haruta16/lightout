@@ -4,6 +4,7 @@ import {
   registerGoal,
   registerSelector,
   registerSystem,
+  type BoardNode,
   type EntityId,
   type GameEntity,
   type MechanicRegistry,
@@ -134,21 +135,34 @@ export function createStandardRegistry(): MechanicRegistry {
         .filter((entity) => entity.nodeId)
         .map((entity) => entity.nodeId as string),
     );
-    const nodes = Object.values(state.board.nodes).sort(
-      (a, b) => b.position.y - a.position.y,
-    );
+    const nodesByColumn = new Map<number, BoardNode[]>();
+    for (const node of Object.values(state.board.nodes)) {
+      const column = nodesByColumn.get(node.position.x) ?? [];
+      column.push(node);
+      nodesByColumn.set(node.position.x, column);
+    }
+    for (const nodes of nodesByColumn.values()) {
+      nodes.sort((a, b) => a.position.y - b.position.y || a.id.localeCompare(b.id));
+    }
+    const fallingEntities = Object.values(state.entities)
+      .filter((entity) => entity.kind === kind && entity.nodeId)
+      .sort((a, b) => {
+        const first = a.nodeId ? state.board.nodes[a.nodeId] : undefined;
+        const second = b.nodeId ? state.board.nodes[b.nodeId] : undefined;
+        return (
+          (second?.position.y ?? 0) - (first?.position.y ?? 0) ||
+          a.id.localeCompare(b.id)
+        );
+      });
     const mutations: StateMutation[] = [];
-    for (const entity of Object.values(state.entities)) {
-      if (entity.kind !== kind || !entity.nodeId) continue;
+    for (const entity of fallingEntities) {
+      if (!entity.nodeId) continue;
       const current = state.board.nodes[entity.nodeId];
       if (!current) continue;
-      const destination = nodes.find(
-        (node) =>
-          node.position.x === current.position.x &&
-          node.position.y > current.position.y &&
-          !occupied.has(node.id),
-      );
-      if (!destination) continue;
+      const column = nodesByColumn.get(current.position.x);
+      const currentIndex = column?.findIndex((node) => node.id === current.id) ?? -1;
+      const destination = currentIndex >= 0 ? column?.[currentIndex + 1] : undefined;
+      if (!destination || occupied.has(destination.id)) continue;
       occupied.delete(entity.nodeId);
       occupied.add(destination.id);
       mutations.push({

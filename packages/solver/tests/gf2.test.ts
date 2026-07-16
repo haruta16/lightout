@@ -45,4 +45,58 @@ describe("GF(2) solver", () => {
       "unsupported",
     );
   });
+
+  it("declines binary actions that do not actually toggle state", () => {
+    const registry = createStandardRegistry();
+    const { initialState, ruleset } = createExperiment({
+      size: 3,
+      stateCount: 2,
+      goalValue: 0,
+      influence: "cross",
+      boardShape: "full",
+      seed: 4,
+    });
+    const nonToggleRuleset = {
+      ...ruleset,
+      actions: ruleset.actions.map((action) =>
+        action.commandType === "activate"
+          ? {
+              ...action,
+              effects: [
+                {
+                  type: "set-channel",
+                  params: { channel: "power", value: 1 },
+                },
+              ],
+            }
+          : action,
+      ),
+    };
+
+    const result = solveBinaryToggle(initialState, nonToggleRuleset, registry);
+    expect(result.status).toBe("unsupported");
+    expect(result.presses).toEqual([]);
+  });
+
+  it("does not describe an unsolvable board as having a minimal solution", () => {
+    const registry = createStandardRegistry();
+    const { initialState, ruleset } = createExperiment({
+      size: 2,
+      stateCount: 2,
+      goalValue: 0,
+      influence: "diagonal",
+      boardShape: "full",
+      seed: 1,
+    });
+    for (const entity of Object.values(initialState.entities)) {
+      entity.channels.power = 0;
+    }
+    const first = Object.values(initialState.entities)[0];
+    expect(first).toBeDefined();
+    if (first) first.channels.power = 1;
+
+    const result = solveBinaryToggle(initialState, ruleset, registry);
+    expect(result.status).toBe("unsolvable");
+    expect(result.minimal).toBe(false);
+  });
 });

@@ -40,6 +40,7 @@ export function applyMutations(
           throw new Error(`Unknown destination node: ${mutation.toNodeId}`);
         }
         const fromNodeId = entity.nodeId;
+        if (fromNodeId === mutation.toNodeId) break;
         entity.nodeId = mutation.toNodeId;
         events.push({
           type: "entity-moved",
