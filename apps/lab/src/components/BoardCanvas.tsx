@@ -1,0 +1,156 @@
+import type { CSSProperties } from "react";
+import type { GameEntity, GameState } from "@lightout/engine";
+import type { NodeShape, WorkspaceMode } from "../workspace";
+
+interface BoardCanvasProps {
+  state: GameState;
+  stateCount: number;
+  goalValue: number;
+  nodeShape: NodeShape;
+  mode: WorkspaceMode;
+  hovered: string | null;
+  selected: string | null;
+  affected: Set<string>;
+  changed: Set<string>;
+  solution: Map<string, number>;
+  showSolution: boolean;
+  onHover: (id: string | null) => void;
+  onActivate: (entity: GameEntity) => void;
+}
+
+export function BoardCanvas({
+  state,
+  stateCount,
+  goalValue,
+  nodeShape,
+  mode,
+  hovered,
+  selected,
+  affected,
+  changed,
+  solution,
+  showSolution,
+  onHover,
+  onActivate,
+}: BoardCanvasProps) {
+  const nodes = Object.values(state.board.nodes);
+  const maxX = Math.max(1, ...nodes.map((node) => node.position.x));
+  const maxY = Math.max(1, ...nodes.map((node) => node.position.y));
+  const byNode = new Map(
+    Object.values(state.entities)
+      .filter((entity) => entity.nodeId)
+      .map((entity) => [entity.nodeId as string, entity]),
+  );
+  const unit = 92;
+  const pad = 68;
+  const width = maxX * unit + pad * 2;
+  const height = maxY * unit + pad * 2;
+
+  return (
+    <svg
+      className={`board-svg mode-${mode}`}
+      viewBox={`0 0 ${width} ${height}`}
+      role="group"
+      aria-label="开关联动实验棋盘"
+    >
+      <defs>
+        <pattern id="board-grid" width="23" height="23" patternUnits="userSpaceOnUse">
+          <path d="M 23 0 L 0 0 0 23" className="board-grid-line" />
+        </pattern>
+        <radialGradient id="board-vignette">
+          <stop offset="0" stopColor="var(--board-glow)" stopOpacity=".16" />
+          <stop offset="1" stopColor="var(--board-glow)" stopOpacity="0" />
+        </radialGradient>
+      </defs>
+      <rect className="board-grid" width="100%" height="100%" fill="url(#board-grid)" />
+      <rect width="100%" height="100%" fill="url(#board-vignette)" />
+
+      {hovered &&
+        [...affected]
+          .filter((id) => id !== hovered)
+          .map((id) => {
+            const source = state.entities[hovered];
+            const target = state.entities[id];
+            const sourceNode = source?.nodeId
+              ? state.board.nodes[source.nodeId]
+              : undefined;
+            const targetNode = target?.nodeId
+              ? state.board.nodes[target.nodeId]
+              : undefined;
+            if (!sourceNode || !targetNode) return null;
+            return (
+              <line
+                key={`wire:${id}`}
+                className="influence-wire"
+                x1={pad + sourceNode.position.x * unit}
+                y1={pad + sourceNode.position.y * unit}
+                x2={pad + targetNode.position.x * unit}
+                y2={pad + targetNode.position.y * unit}
+              />
+            );
+          })}
+
+      {nodes.map((node) => {
+        const entity = byNode.get(node.id);
+        if (!entity) return null;
+        const value = Number(entity.channels.power ?? 0);
+        const solutionCount = solution.get(entity.id) ?? 0;
+        const style = {
+          "--state-hue": String(stateCount === 2 ? 42 : (35 + value * 87) % 360),
+          "--state-level": String(value / Math.max(1, stateCount - 1)),
+        } as CSSProperties;
+        return (
+          <g
+            key={entity.id}
+            className={[
+              "cell",
+              `shape-${nodeShape}`,
+              value === goalValue ? "is-goal" : "is-active",
+              affected.has(entity.id) ? "is-affected" : "",
+              hovered === entity.id ? "is-anchor" : "",
+              selected === entity.id ? "is-selected" : "",
+              changed.has(entity.id) ? "is-changed" : "",
+            ].join(" ")}
+            style={style}
+            transform={`translate(${pad + node.position.x * unit} ${pad + node.position.y * unit})`}
+            role="button"
+            tabIndex={0}
+            aria-label={`位置 ${node.position.x + 1}, ${node.position.y + 1}，状态 ${value}`}
+            onMouseEnter={() => onHover(entity.id)}
+            onMouseLeave={() => onHover(null)}
+            onFocus={() => onHover(entity.id)}
+            onBlur={() => onHover(null)}
+            onClick={() => onActivate(entity)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                onActivate(entity);
+              }
+            }}
+          >
+            {nodeShape === "circle" ? (
+              <>
+                <circle className="cell-hit" r="39" />
+                <circle className="cell-rim" r="32" />
+                <circle className="cell-core" r="23" />
+              </>
+            ) : (
+              <>
+                <rect className="cell-hit" x="-39" y="-39" width="78" height="78" rx="12" />
+                <rect className="cell-rim" x="-32" y="-32" width="64" height="64" rx="9" />
+                <rect className="cell-core" x="-23" y="-23" width="46" height="46" rx="6" />
+              </>
+            )}
+            {stateCount > 2 && <text className="cell-value" y="5">{value}</text>}
+            {showSolution && solutionCount > 0 && (
+              <g className="solution-mark" transform="translate(28 -28)">
+                <circle r="11" />
+                <text y="4">{solutionCount === 1 ? "+" : `×${solutionCount}`}</text>
+              </g>
+            )}
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
