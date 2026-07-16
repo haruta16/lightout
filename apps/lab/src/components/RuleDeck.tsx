@@ -1,16 +1,19 @@
 import { useRef, type CSSProperties, type WheelEvent } from "react";
 import type {
+  BoardGeometry,
   BoardShape,
   InfluencePattern,
 } from "@lightout/mechanics-standard";
+import {
+  BOARD_GEOMETRIES,
+  supportedInfluencesFor,
+} from "@lightout/mechanics-standard";
 import type { RulePreset } from "../workspace";
-
-const influenceLabels: Record<InfluencePattern, string> = {
-  cross: "十字相邻",
-  diagonal: "对角相邻",
-  king: "八方向",
-  "row-column": "整行整列",
-};
+import {
+  geometryLabel,
+  geometrySymbols,
+  influenceLabels,
+} from "../rulePresentation";
 
 const shapeLabels: Record<BoardShape, string> = {
   full: "完整方阵",
@@ -42,6 +45,9 @@ export function RuleDeck({
   const wheelLockedUntil = useRef(0);
   const previousIndex = (activeIndex - 1 + presets.length) % presets.length;
   const nextIndex = (activeIndex + 1) % presets.length;
+  const supportedInfluences = supportedInfluencesFor(
+    activePreset.level.geometry,
+  );
 
   function switchBy(direction: -1 | 1): void {
     onSwitch(direction < 0 ? previousIndex : nextIndex);
@@ -79,6 +85,23 @@ export function RuleDeck({
           <span>↓</span>
           <small>{presets[nextIndex]?.name}</small>
         </button>
+
+        <div className="rule-map" aria-label="全部规则">
+          {presets.map((preset, index) => (
+            <button
+              key={preset.id}
+              type="button"
+              className={index === activeIndex ? "selected" : ""}
+              style={{ "--chip-accent": preset.accent } as CSSProperties}
+              aria-label={`切换到${preset.name}`}
+              title={`${preset.name} · ${geometryLabel(preset.level.geometry)}`}
+              onClick={() => onSwitch(index)}
+            >
+              <span>{geometrySymbols[preset.level.geometry]}</span>
+              <small>{String(index + 1).padStart(2, "0")}</small>
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="panel-scroll rule-card-body">
@@ -182,8 +205,8 @@ export function RuleDeck({
                 )
               }
             >
-              {Object.entries(influenceLabels).map(([value, label]) => (
-                <option key={value} value={value}>{label}</option>
+              {supportedInfluences.map((value) => (
+                <option key={value} value={value}>{influenceLabels[value]}</option>
               ))}
             </select>
           </label>
@@ -215,6 +238,35 @@ export function RuleDeck({
                 )
               }
             />
+          </label>
+          <label className="select-field">
+            <span>节点拓扑</span>
+            <select
+              value={activePreset.level.geometry}
+              onChange={(event) => {
+                const geometry = event.target.value as BoardGeometry;
+                const availableInfluences = supportedInfluencesFor(geometry);
+                onChange(
+                  {
+                    ...activePreset,
+                    definition: {
+                      ...activePreset.definition,
+                      influence: availableInfluences.includes(
+                        activePreset.definition.influence,
+                      )
+                        ? activePreset.definition.influence
+                        : availableInfluences[0] ?? "neighbors",
+                    },
+                    level: { ...activePreset.level, geometry },
+                  },
+                  true,
+                );
+              }}
+            >
+              {BOARD_GEOMETRIES.map((value) => (
+                <option key={value} value={value}>{geometryLabel(value)}</option>
+              ))}
+            </select>
           </label>
           <label className="select-field">
             <span>棋盘形状</span>

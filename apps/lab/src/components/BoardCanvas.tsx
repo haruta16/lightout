@@ -1,12 +1,13 @@
 import type { CSSProperties } from "react";
 import type { GameEntity, GameState } from "@lightout/engine";
-import type { NodeShape, WorkspaceMode } from "../workspace";
+import { geometryFromNodeTags } from "@lightout/mechanics-standard";
+import type { WorkspaceMode } from "../workspace";
+import { NodeGeometryGlyph } from "./NodeGeometryGlyph";
 
 interface BoardCanvasProps {
   state: GameState;
   stateCount: number;
   goalValue: number;
-  nodeShape: NodeShape;
   mode: WorkspaceMode;
   hovered: string | null;
   selected: string | null;
@@ -22,7 +23,6 @@ export function BoardCanvas({
   state,
   stateCount,
   goalValue,
-  nodeShape,
   mode,
   hovered,
   selected,
@@ -79,14 +79,22 @@ export function BoardCanvas({
               : undefined;
             if (!sourceNode || !targetNode) return null;
             return (
-              <line
-                key={`wire:${id}`}
-                className="influence-wire"
-                x1={pad + sourceNode.position.x * unit}
-                y1={pad + sourceNode.position.y * unit}
-                x2={pad + targetNode.position.x * unit}
-                y2={pad + targetNode.position.y * unit}
-              />
+              <g key={`wire:${id}`} className="influence-connection">
+                <line
+                  className="influence-wire-backdrop"
+                  x1={pad + sourceNode.position.x * unit}
+                  y1={pad + sourceNode.position.y * unit}
+                  x2={pad + targetNode.position.x * unit}
+                  y2={pad + targetNode.position.y * unit}
+                />
+                <line
+                  className="influence-wire"
+                  x1={pad + sourceNode.position.x * unit}
+                  y1={pad + sourceNode.position.y * unit}
+                  x2={pad + targetNode.position.x * unit}
+                  y2={pad + targetNode.position.y * unit}
+                />
+              </g>
             );
           })}
 
@@ -95,6 +103,7 @@ export function BoardCanvas({
         if (!entity) return null;
         const value = Number(entity.channels.power ?? 0);
         const solutionCount = solution.get(entity.id) ?? 0;
+        const geometry = geometryFromNodeTags(node.tags);
         const style = {
           "--state-hue": String(stateCount === 2 ? 42 : (35 + value * 87) % 360),
           "--state-level": String(value / Math.max(1, stateCount - 1)),
@@ -104,7 +113,7 @@ export function BoardCanvas({
             key={entity.id}
             className={[
               "cell",
-              `shape-${nodeShape}`,
+              `shape-${geometry}`,
               value === goalValue ? "is-goal" : "is-active",
               affected.has(entity.id) ? "is-affected" : "",
               hovered === entity.id ? "is-anchor" : "",
@@ -115,7 +124,7 @@ export function BoardCanvas({
             transform={`translate(${pad + node.position.x * unit} ${pad + node.position.y * unit})`}
             role="button"
             tabIndex={0}
-            aria-label={`位置 ${node.position.x + 1}, ${node.position.y + 1}，状态 ${value}`}
+            aria-label={`节点 ${node.id}，状态 ${value}`}
             onMouseEnter={() => onHover(entity.id)}
             onMouseLeave={() => onHover(null)}
             onFocus={() => onHover(entity.id)}
@@ -128,19 +137,7 @@ export function BoardCanvas({
               }
             }}
           >
-            {nodeShape === "circle" ? (
-              <>
-                <circle className="cell-hit" r="39" />
-                <circle className="cell-rim" r="32" />
-                <circle className="cell-core" r="23" />
-              </>
-            ) : (
-              <>
-                <rect className="cell-hit" x="-39" y="-39" width="78" height="78" rx="12" />
-                <rect className="cell-rim" x="-32" y="-32" width="64" height="64" rx="9" />
-                <rect className="cell-core" x="-23" y="-23" width="46" height="46" rx="6" />
-              </>
-            )}
+            <NodeGeometryGlyph geometry={geometry} tags={node.tags} />
             {stateCount > 2 && <text className="cell-value" y="5">{value}</text>}
             {showSolution && solutionCount > 0 && (
               <g className="solution-mark" transform="translate(28 -28)">

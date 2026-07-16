@@ -1,11 +1,19 @@
 import type { CSSProperties } from "react";
 import type { GameEntity, GameEvent, GameState } from "@lightout/engine";
 import type { SolveResult } from "@lightout/solver";
+import {
+  getBoardGeometryDefinition,
+  type BoardGeometry,
+  type InfluencePattern,
+} from "@lightout/mechanics-standard";
 import type {
   EditorTool,
-  NodeShape,
   WorkspaceMode,
 } from "../workspace";
+import {
+  geometryNames,
+  influenceLabels,
+} from "../rulePresentation";
 
 function describeEvent(event: GameEvent): string {
   switch (event.type) {
@@ -39,13 +47,14 @@ interface InspectorPanelProps {
   stateCount: number;
   paintValue: number;
   editorTool: EditorTool;
-  nodeShape: NodeShape;
+  geometry: BoardGeometry;
+  influence: InfluencePattern;
+  affectedCount: number | null;
   showSolution: boolean;
   onPaintValueChange: (value: number) => void;
   onFill: (value: number) => void;
   onApplyHint: () => void;
   onToggleSolution: () => void;
-  onNodeShapeChange: (shape: NodeShape) => void;
 }
 
 function EntitySection({ entity, state }: { entity: GameEntity; state: GameState }) {
@@ -84,13 +93,14 @@ export function InspectorPanel({
   stateCount,
   paintValue,
   editorTool,
-  nodeShape,
+  geometry,
+  influence,
+  affectedCount,
   showSolution,
   onPaintValueChange,
   onFill,
   onApplyHint,
   onToggleSolution,
-  onNodeShapeChange,
 }: InspectorPanelProps) {
   return (
     <aside className="workspace-panel inspector-panel">
@@ -193,10 +203,21 @@ export function InspectorPanel({
             <div><span>未达目标</span><b>{activeCount} / {nodeCount}</b><i style={{ width: `${nodeCount === 0 ? 0 : (activeCount / nodeCount) * 100}%` }} /></div>
             <div><span>当前回合</span><b>{state.turn}</b><i style={{ width: `${Math.min(100, state.turn * 4)}%` }} /></div>
           </div>
-          <div className="shape-toggle">
-            <span>节点外观</span>
-            <button type="button" className={nodeShape === "circle" ? "selected" : ""} onClick={() => onNodeShapeChange("circle")}>圆形</button>
-            <button type="button" className={nodeShape === "rounded-square" ? "selected" : ""} onClick={() => onNodeShapeChange("rounded-square")}>方形</button>
+          <div className="topology-breakdown">
+            <div>
+              <span>基础拓扑</span>
+              <strong>
+                {geometryNames[geometry]} · 最多 {getBoardGeometryDefinition(geometry).maxNeighbors} 邻居
+              </strong>
+            </div>
+            <div>
+              <span>当前联动</span>
+              <strong>{influenceLabels[influence]}</strong>
+            </div>
+            <div className={affectedCount === null ? "is-idle" : "is-previewing"}>
+              <span>悬停预览</span>
+              <strong>{affectedCount === null ? "指向节点查看" : `${affectedCount} 个节点（含自身）`}</strong>
+            </div>
           </div>
         </section>
 

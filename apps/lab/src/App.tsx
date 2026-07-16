@@ -33,7 +33,6 @@ import {
   saveWorkspace,
   toExperimentConfig,
   type EditorTool,
-  type NodeShape,
   type RulePreset,
   type Theme,
   type WorkspaceMode,
@@ -77,15 +76,9 @@ export function App() {
   const [hovered, setHovered] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [showSolution, setShowSolution] = useState(false);
+  const [focusMode, setFocusMode] = useState(false);
   const [theme, setTheme] = useState<Theme>(() =>
     loadPreference("lightout-theme", ["light", "dark"], "dark"),
-  );
-  const [nodeShape, setNodeShape] = useState<NodeShape>(() =>
-    loadPreference(
-      "lightout-node-shape",
-      ["circle", "rounded-square"],
-      "circle",
-    ),
   );
 
   const activeIndex = Math.max(
@@ -141,10 +134,6 @@ export function App() {
     document.documentElement.dataset.theme = theme;
     savePreference("lightout-theme", theme);
   }, [theme]);
-
-  useEffect(() => {
-    savePreference("lightout-node-shape", nodeShape);
-  }, [nodeShape]);
 
   function resetTransientState(): void {
     setEvents([]);
@@ -319,18 +308,7 @@ export function App() {
         </button>
       </header>
 
-      <section className="workspace-grid">
-        <RuleDeck
-          presets={presets}
-          activeIndex={activeIndex}
-          activePreset={activePreset}
-          savedAt={savedAt}
-          isSaved={isSaved}
-          onSwitch={switchRule}
-          onChange={changePreset}
-          onDuplicate={copyRule}
-        />
-
+      <section className={`workspace-grid ${focusMode ? "focus-mode" : ""}`}>
         <section className="workspace-panel board-workspace">
           <header className="board-toolbar">
             <div className="scene-title">
@@ -347,6 +325,13 @@ export function App() {
               </div>
             )}
             <div className="history-tools">
+              <button
+                type="button"
+                className={`focus-toggle ${focusMode ? "selected" : ""}`}
+                onClick={() => setFocusMode((value) => !value)}
+              >
+                {focusMode ? "显示面板" : "专注棋盘"}
+              </button>
               <button type="button" disabled={!canUndo} onClick={undo} aria-label="撤销">↶</button>
               <button type="button" disabled={!canRedo} onClick={redo} aria-label="重做">↷</button>
               {mode === "play" ? (
@@ -363,7 +348,6 @@ export function App() {
               state={currentState}
               stateCount={config.stateCount}
               goalValue={config.goalValue}
-              nodeShape={nodeShape}
               mode={mode}
               hovered={hovered}
               selected={selected}
@@ -400,25 +384,41 @@ export function App() {
           </footer>
         </section>
 
-        <InspectorPanel
-          mode={mode}
-          state={currentState}
-          selectedEntity={selectedEntity}
-          solver={solver}
-          events={events}
-          nodeCount={nodeCount}
-          activeCount={activeCount}
-          stateCount={config.stateCount}
-          paintValue={paintValue}
-          editorTool={editorTool}
-          nodeShape={nodeShape}
-          showSolution={showSolution}
-          onPaintValueChange={setPaintValue}
-          onFill={fillEditor}
-          onApplyHint={applyHint}
-          onToggleSolution={() => setShowSolution((value) => !value)}
-          onNodeShapeChange={setNodeShape}
-        />
+        {!focusMode && (
+          <RuleDeck
+            presets={presets}
+            activeIndex={activeIndex}
+            activePreset={activePreset}
+            savedAt={savedAt}
+            isSaved={isSaved}
+            onSwitch={switchRule}
+            onChange={changePreset}
+            onDuplicate={copyRule}
+          />
+        )}
+
+        {!focusMode && (
+          <InspectorPanel
+            mode={mode}
+            state={currentState}
+            selectedEntity={selectedEntity}
+            solver={solver}
+            events={events}
+            nodeCount={nodeCount}
+            activeCount={activeCount}
+            stateCount={config.stateCount}
+            paintValue={paintValue}
+            editorTool={editorTool}
+            geometry={config.geometry ?? "square"}
+            influence={config.influence}
+            affectedCount={hovered ? affected.size : null}
+            showSolution={showSolution}
+            onPaintValueChange={setPaintValue}
+            onFill={fillEditor}
+            onApplyHint={applyHint}
+            onToggleSolution={() => setShowSolution((value) => !value)}
+          />
+        )}
       </section>
     </main>
   );

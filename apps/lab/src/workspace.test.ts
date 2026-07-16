@@ -22,18 +22,34 @@ function createMemoryStorage(initial?: string) {
 }
 
 describe("rule workspace", () => {
-  it("ships one valid preset for each supported state count", () => {
-    expect(DEFAULT_RULE_PRESETS.map((preset) => preset.definition.stateCount)).toEqual([
-      2,
-      3,
-      4,
-      5,
-    ]);
+  it("ships valid presets for every supported state count and both topologies", () => {
+    expect(new Set(DEFAULT_RULE_PRESETS.map((preset) => preset.definition.stateCount))).toEqual(
+      new Set([2, 3, 4, 5]),
+    );
+    expect(new Set(DEFAULT_RULE_PRESETS.map((preset) => preset.level.geometry))).toEqual(
+      new Set(["square", "hex", "triangle"]),
+    );
     for (const preset of DEFAULT_RULE_PRESETS) {
       const config = toExperimentConfig(preset);
       expect(config.goalValue).toBeGreaterThanOrEqual(0);
       expect(config.goalValue).toBeLessThan(config.stateCount);
     }
+  });
+
+  it("migrates saved square rules and appends built-in topology showcases", () => {
+    const legacyPreset = structuredClone(DEFAULT_RULE_PRESETS[0]!);
+    const legacyLevel = legacyPreset.level as Partial<typeof legacyPreset.level>;
+    delete legacyLevel.geometry;
+    const stored = JSON.stringify({
+      version: 1,
+      activeRuleId: legacyPreset.id,
+      presets: [legacyPreset],
+    });
+
+    const workspace = loadWorkspace(createMemoryStorage(stored));
+    expect(workspace.presets[0]?.level.geometry).toBe("square");
+    expect(workspace.presets.some((preset) => preset.id === "hex-sixfold")).toBe(true);
+    expect(workspace.presets.some((preset) => preset.id === "triangle-tripoint")).toBe(true);
   });
 
   it("round-trips a workspace without coupling it to browser globals", () => {

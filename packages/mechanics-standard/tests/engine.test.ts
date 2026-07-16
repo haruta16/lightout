@@ -13,11 +13,89 @@ import {
 } from "@lightout/engine";
 import {
   createExperiment,
+  createHexTopology,
   createRectTopology,
+  createTriangleTopology,
   createStandardRegistry,
+  supportedInfluencesFor,
 } from "../src";
 
 describe("headless engine with standard mechanics", () => {
+  it("models square, hex, and triangle neighborhoods independently from rendering", () => {
+    const square = createRectTopology({ width: 3, height: 3 });
+    const hex = createHexTopology({ width: 3, height: 3 });
+    const triangle = createTriangleTopology({ width: 3, height: 3 });
+    const squareNeighbors = square.edges.filter(
+      (edge) => edge.from === "n:1:1" && edge.relation === "adjacent",
+    );
+    const hexNeighbors = hex.edges.filter(
+      (edge) => edge.from === "n:1:1" && edge.relation === "adjacent",
+    );
+    const triangleNeighbors = triangle.edges.filter(
+      (edge) => edge.from === "n:1:1" && edge.relation === "adjacent",
+    );
+
+    expect(squareNeighbors).toHaveLength(8);
+    expect(hexNeighbors).toHaveLength(6);
+    expect(triangleNeighbors).toHaveLength(3);
+    expect(square.nodes["n:1:1"]?.tags).toContain("geometry:square");
+    expect(hex.nodes["n:1:1"]?.tags).toContain("geometry:hex");
+    expect(triangle.nodes["n:1:1"]?.tags).toContain("geometry:triangle");
+    expect(supportedInfluencesFor("square")).toEqual([
+      "cross",
+      "diagonal",
+      "king",
+      "neighbors",
+      "row-column",
+    ]);
+    expect(supportedInfluencesFor("hex")).toEqual(["neighbors"]);
+    expect(supportedInfluencesFor("triangle")).toEqual(["neighbors"]);
+  });
+
+  it("uses all six adjacent hex nodes for the sixfold rule", () => {
+    const registry = createStandardRegistry();
+    const { initialState, ruleset } = createExperiment({
+      size: 3,
+      stateCount: 3,
+      goalValue: 0,
+      influence: "neighbors",
+      boardShape: "full",
+      geometry: "hex",
+      seed: 12,
+    });
+
+    const result = dispatch(
+      initialState,
+      { type: "activate", anchorEntityId: "light:n:1:1" },
+      ruleset,
+      registry,
+    );
+    const changed = result.events.filter((event) => event.type === "channel-changed");
+    expect(changed).toHaveLength(7);
+  });
+
+  it("uses all three edge-adjacent nodes for the triangle rule", () => {
+    const registry = createStandardRegistry();
+    const { initialState, ruleset } = createExperiment({
+      size: 3,
+      stateCount: 3,
+      goalValue: 0,
+      influence: "neighbors",
+      boardShape: "full",
+      geometry: "triangle",
+      seed: 15,
+    });
+
+    const result = dispatch(
+      initialState,
+      { type: "activate", anchorEntityId: "light:n:1:1" },
+      ruleset,
+      registry,
+    );
+    const changed = result.events.filter((event) => event.type === "channel-changed");
+    expect(changed).toHaveLength(4);
+  });
+
   it("restores a binary state when the same switch is activated twice", () => {
     const registry = createStandardRegistry();
     const { initialState, ruleset } = createExperiment({

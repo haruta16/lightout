@@ -4,9 +4,25 @@ import type {
   JsonValue,
   Ruleset,
 } from "@lightout/engine";
-import { createRectTopology, type BoardShape } from "./topology";
+import {
+  createBoardTopology,
+  getBoardGeometryDefinition,
+  type BoardGeometry,
+  type BoardShape,
+} from "./topology";
 
-export type InfluencePattern = "cross" | "diagonal" | "king" | "row-column";
+export const INFLUENCE_DEFINITIONS = {
+  cross: { relations: ["orthogonal"] },
+  diagonal: { relations: ["diagonal"] },
+  king: { relations: ["orthogonal", "diagonal"] },
+  neighbors: { relations: ["adjacent"] },
+  "row-column": { relations: ["same-row", "same-column"] },
+} as const;
+
+export type InfluencePattern = keyof typeof INFLUENCE_DEFINITIONS;
+export const INFLUENCE_PATTERNS = Object.keys(
+  INFLUENCE_DEFINITIONS,
+) as InfluencePattern[];
 
 export interface ExperimentConfig {
   size: number;
@@ -14,20 +30,25 @@ export interface ExperimentConfig {
   goalValue: number;
   influence: InfluencePattern;
   boardShape: BoardShape;
+  geometry?: BoardGeometry;
   seed: number;
 }
 
-function relationsFor(pattern: InfluencePattern): string[] {
-  switch (pattern) {
-    case "cross":
-      return ["orthogonal"];
-    case "diagonal":
-      return ["diagonal"];
-    case "king":
-      return ["orthogonal", "diagonal"];
-    case "row-column":
-      return ["same-row", "same-column"];
-  }
+export function relationsFor(pattern: InfluencePattern): string[] {
+  return [...INFLUENCE_DEFINITIONS[pattern].relations];
+}
+
+export function supportedInfluencesFor(
+  geometry: BoardGeometry,
+): InfluencePattern[] {
+  const supportedRelations = new Set(
+    getBoardGeometryDefinition(geometry).supportedRelations,
+  );
+  return INFLUENCE_PATTERNS.filter((pattern) =>
+    INFLUENCE_DEFINITIONS[pattern].relations.every((relation) =>
+      supportedRelations.has(relation),
+    ),
+  );
 }
 
 function random(seed: number): () => number {
@@ -65,10 +86,12 @@ export function createExperiment(config: ExperimentConfig): {
   const size = Math.max(2, Math.min(12, Math.floor(config.size)));
   const stateCount = Math.max(2, Math.min(7, Math.floor(config.stateCount)));
   const goalValue = ((config.goalValue % stateCount) + stateCount) % stateCount;
-  const board = createRectTopology({
+  const geometry = config.geometry ?? "square";
+  const board = createBoardTopology({
     width: size,
     height: size,
     shape: config.boardShape,
+    geometry,
   });
   const entities: Record<string, GameEntity> = {};
   for (const node of Object.values(board.nodes)) {
@@ -120,9 +143,10 @@ export function createExperiment(config: ExperimentConfig): {
     goalValue,
     influence: config.influence,
     boardShape: config.boardShape,
+    geometry,
   };
   const ruleset: Ruleset = {
-    id: `experiment:${config.influence}:${stateCount}`,
+    id: `experiment:${geometry}:${config.influence}:${stateCount}`,
     name: "Switch Toggling Experiment",
     entityKinds: {
       light: {
