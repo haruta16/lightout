@@ -53,11 +53,36 @@ export function validateGameState(
   ruleset: Readonly<Ruleset>,
 ): string[] {
   const errors: string[] = [];
-  for (const entity of Object.values(state.entities)) {
+  for (const [nodeKey, node] of Object.entries(state.board.nodes)) {
+    if (nodeKey !== node.id) errors.push(`Board node key does not match id: ${nodeKey} != ${node.id}`);
+    if (!Number.isFinite(node.position.x) || !Number.isFinite(node.position.y)) {
+      errors.push(`Board node ${node.id} has an invalid position`);
+    }
+  }
+  const seenEdges = new Set<string>();
+  for (const edge of state.board.edges) {
+    if (!state.board.nodes[edge.from]) errors.push(`Board edge references unknown source: ${edge.from}`);
+    if (!state.board.nodes[edge.to]) errors.push(`Board edge references unknown target: ${edge.to}`);
+    if (edge.relation.length === 0) errors.push(`Board edge ${edge.from} -> ${edge.to} has an empty relation`);
+    const edgeKey = `${edge.from}\u0000${edge.to}\u0000${edge.relation}`;
+    if (seenEdges.has(edgeKey)) errors.push(`Board contains a duplicate edge: ${edge.from} -> ${edge.to} (${edge.relation})`);
+    seenEdges.add(edgeKey);
+  }
+  for (const [entityKey, entity] of Object.entries(state.entities)) {
+    if (entityKey !== entity.id) errors.push(`Entity key does not match id: ${entityKey} != ${entity.id}`);
     if (ruleset.entityKinds) errors.push(...validateEntity(entity, ruleset));
     if (entity.nodeId && !state.board.nodes[entity.nodeId]) {
       errors.push(`Entity ${entity.id} references unknown node: ${entity.nodeId}`);
     }
+  }
+  if (!Number.isInteger(state.turn) || state.turn < 0) errors.push("Game turn must be a non-negative integer");
+  if (!Number.isInteger(state.seed) || state.seed < 0) errors.push("Game seed must be a non-negative integer");
+  if (!["playing", "won", "lost"].includes(state.status)) errors.push(`Unknown game status: ${state.status}`);
+  for (const [counter, value] of Object.entries(state.counters)) {
+    if (!Number.isFinite(value)) errors.push(`Counter ${counter} must be finite`);
+  }
+  for (const [item, value] of Object.entries(state.inventory)) {
+    if (!Number.isFinite(value)) errors.push(`Inventory ${item} must be finite`);
   }
   return errors;
 }

@@ -3,7 +3,6 @@ import { analyzeAdditiveRule, modulo, type AdditiveRuleModel } from "./model";
 import {
   type PuzzleSolver,
   type SolveResult,
-  type SolverContext,
   unsupportedResult,
 } from "./types";
 
@@ -129,7 +128,19 @@ export const moduloFourSolver: PuzzleSolver = {
         analysis.model.modulus,
       );
     }
-    const solution = solveModuloFour(analysis.model.matrix, analysis.model.target);
+    const columnCount = analysis.model.entityIds.length;
+    const squareMatrix = [
+      ...analysis.model.matrix.map((row) => [...row]),
+      ...Array.from(
+        { length: Math.max(0, columnCount - analysis.model.matrix.length) },
+        () => Array<number>(columnCount).fill(0),
+      ),
+    ];
+    const squareTarget = [
+      ...analysis.model.target,
+      ...Array<number>(Math.max(0, columnCount - analysis.model.target.length)).fill(0),
+    ];
+    const solution = solveModuloFour(squareMatrix, squareTarget);
     return resultFromLinearSolution(analysis.model, solution, this);
   },
 };

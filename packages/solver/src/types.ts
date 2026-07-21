@@ -4,6 +4,7 @@ export interface SolverContext {
   state: Readonly<GameState>;
   ruleset: Readonly<Ruleset>;
   registry: MechanicRegistry;
+  analysisCache: Map<string, unknown>;
 }
 
 export interface SolverSupport {

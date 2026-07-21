@@ -1,13 +1,11 @@
 import type { BoardEdge, BoardNode, BoardTopology } from "@lightout/engine";
 
-export type BoardShape = "full" | "diamond" | "ring";
 export const BOARD_GEOMETRIES = ["square", "hex", "triangle"] as const;
 export type BoardGeometry = (typeof BOARD_GEOMETRIES)[number];
 
 export interface RectTopologyOptions {
   width: number;
   height: number;
-  shape?: BoardShape;
 }
 
 export interface BoardTopologyOptions extends RectTopologyOptions {
@@ -22,24 +20,18 @@ export interface BoardGeometryDefinition {
   create: (options: RectTopologyOptions) => BoardTopology;
 }
 
-function nodeId(x: number, y: number): string {
+export interface GridCoordinate {
+  x: number;
+  y: number;
+}
+
+export function formatNodeId(x: number, y: number): string {
   return `n:${x}:${y}`;
 }
 
-function includeCoordinate(
-  x: number,
-  y: number,
-  width: number,
-  height: number,
-  shape: BoardShape,
-): boolean {
-  if (shape === "full") return true;
-  const nx = (x + 0.5 - width / 2) / (width / 2);
-  const ny = (y + 0.5 - height / 2) / (height / 2);
-  if (shape === "diamond") return Math.abs(nx) + Math.abs(ny) <= 1.05;
-  const outer = nx * nx + ny * ny <= 1.05;
-  const inner = nx * nx + ny * ny < 0.24;
-  return outer && !inner;
+export function parseNodeId(value: string): GridCoordinate | null {
+  const match = /^n:(\d+):(\d+)$/.exec(value);
+  return match ? { x: Number(match[1]), y: Number(match[2]) } : null;
 }
 
 function addDirectedPair(
@@ -51,151 +43,106 @@ function addDirectedPair(
   edges.push({ from, to, relation }, { from: to, to: from, relation });
 }
 
-export function createRectTopology({
-  width,
-  height,
-  shape = "full",
-}: RectTopologyOptions): BoardTopology {
+export function createRectTopology({ width, height }: RectTopologyOptions): BoardTopology {
   const nodes: Record<string, BoardNode> = {};
   for (let y = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {
-      if (!includeCoordinate(x, y, width, height, shape)) continue;
-      const id = nodeId(x, y);
-      nodes[id] = {
-        id,
-        position: { x, y },
-        tags: ["playable", "geometry:square"],
-      };
+      const id = formatNodeId(x, y);
+      nodes[id] = { id, position: { x, y }, tags: ["playable", "geometry:square"] };
     }
   }
 
   const edges: BoardEdge[] = [];
-  const nodeList = Object.values(nodes);
-  for (let a = 0; a < nodeList.length; a += 1) {
-    const first = nodeList[a];
-    if (!first) continue;
-    for (let b = a + 1; b < nodeList.length; b += 1) {
-      const second = nodeList[b];
-      if (!second) continue;
-      const dx = Math.abs(first.position.x - second.position.x);
-      const dy = Math.abs(first.position.y - second.position.y);
-      if (dx + dy === 1) {
-        addDirectedPair(edges, first.id, second.id, "orthogonal");
-        addDirectedPair(edges, first.id, second.id, "adjacent");
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const from = formatNodeId(x, y);
+      const right = formatNodeId(x + 1, y);
+      const below = formatNodeId(x, y + 1);
+      for (const to of [right, below]) {
+        if (!nodes[to]) continue;
+        addDirectedPair(edges, from, to, "orthogonal");
+        addDirectedPair(edges, from, to, "adjacent");
       }
-      if (dx === 1 && dy === 1) {
-        addDirectedPair(edges, first.id, second.id, "diagonal");
-        addDirectedPair(edges, first.id, second.id, "adjacent");
+      if (nodes[below]) edges.push({ from, to: below, relation: "down" });
+
+      for (const to of [formatNodeId(x - 1, y + 1), formatNodeId(x + 1, y + 1)]) {
+        if (!nodes[to]) continue;
+        addDirectedPair(edges, from, to, "diagonal");
+        addDirectedPair(edges, from, to, "adjacent");
       }
-      if (dy === 0) addDirectedPair(edges, first.id, second.id, "same-row");
-      if (dx === 0) addDirectedPair(edges, first.id, second.id, "same-column");
+
+      for (let otherX = x + 1; otherX < width; otherX += 1) {
+        addDirectedPair(edges, from, formatNodeId(otherX, y), "same-row");
+      }
+      for (let otherY = y + 1; otherY < height; otherY += 1) {
+        addDirectedPair(edges, from, formatNodeId(x, otherY), "same-column");
+      }
     }
   }
   return { nodes, edges };
 }
 
-export function createHexTopology({
-  width,
-  height,
-  shape = "full",
-}: RectTopologyOptions): BoardTopology {
+export function createHexTopology({ width, height }: RectTopologyOptions): BoardTopology {
   const nodes: Record<string, BoardNode> = {};
   for (let y = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {
-      if (!includeCoordinate(x, y, width, height, shape)) continue;
-      const id = nodeId(x, y);
+      const id = formatNodeId(x, y);
       nodes[id] = {
         id,
-        position: {
-          x: x + (y % 2 === 0 ? 0 : 0.5),
-          y: y * (Math.sqrt(3) / 2),
-        },
+        position: { x: x + (y % 2 === 0 ? 0 : 0.5), y: y * (Math.sqrt(3) / 2) },
         tags: ["playable", "geometry:hex"],
       };
     }
   }
-
   const edges: BoardEdge[] = [];
   const directionsForRow = (y: number): ReadonlyArray<readonly [number, number]> =>
     y % 2 === 0
       ? [[-1, 0], [1, 0], [-1, -1], [0, -1], [-1, 1], [0, 1]]
       : [[-1, 0], [1, 0], [0, -1], [1, -1], [0, 1], [1, 1]];
-
   for (let y = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {
-      const from = nodeId(x, y);
-      if (!nodes[from]) continue;
+      const from = formatNodeId(x, y);
       for (const [dx, dy] of directionsForRow(y)) {
-        const to = nodeId(x + dx, y + dy);
+        const to = formatNodeId(x + dx, y + dy);
         if (nodes[to]) edges.push({ from, to, relation: "adjacent" });
       }
     }
   }
-
   return { nodes, edges };
 }
 
-export function createTriangleTopology({
-  width,
-  height,
-  shape = "full",
-}: RectTopologyOptions): BoardTopology {
+export function createTriangleTopology({ width, height }: RectTopologyOptions): BoardTopology {
   const nodes: Record<string, BoardNode> = {};
   for (let y = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {
-      if (!includeCoordinate(x, y, width, height, shape)) continue;
       const pointsUp = (x + y) % 2 === 0;
-      const id = nodeId(x, y);
+      const id = formatNodeId(x, y);
       nodes[id] = {
         id,
-        position: {
-          x: x + (y % 2 === 0 ? 0 : 0.25),
-          y: y * 0.82,
-        },
-        tags: [
-          "playable",
-          "geometry:triangle",
-          pointsUp ? "orientation:up" : "orientation:down",
-        ],
+        position: { x: x + (y % 2 === 0 ? 0 : 0.25), y: y * 0.82 },
+        tags: ["playable", "geometry:triangle", pointsUp ? "orientation:up" : "orientation:down"],
       };
     }
   }
-
   const edges: BoardEdge[] = [];
   for (let y = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {
-      const from = nodeId(x, y);
-      if (!nodes[from]) continue;
+      const from = formatNodeId(x, y);
       const verticalDirection = (x + y) % 2 === 0 ? 1 : -1;
-      const neighbors = [
-        nodeId(x - 1, y),
-        nodeId(x + 1, y),
-        nodeId(x, y + verticalDirection),
-      ];
-      for (const to of neighbors) {
+      for (const to of [formatNodeId(x - 1, y), formatNodeId(x + 1, y), formatNodeId(x, y + verticalDirection)]) {
         if (nodes[to]) edges.push({ from, to, relation: "adjacent" });
       }
     }
   }
-
   return { nodes, edges };
 }
 
-export const BOARD_GEOMETRY_DEFINITIONS: Record<
-  BoardGeometry,
-  BoardGeometryDefinition
-> = {
+export const BOARD_GEOMETRY_DEFINITIONS: Record<BoardGeometry, BoardGeometryDefinition> = {
   square: {
     id: "square",
     nodeTag: "geometry:square",
     maxNeighbors: 8,
-    supportedRelations: [
-      "orthogonal",
-      "diagonal",
-      "adjacent",
-      "same-row",
-      "same-column",
-    ],
+    supportedRelations: ["orthogonal", "diagonal", "adjacent", "same-row", "same-column", "down"],
     create: createRectTopology,
   },
   hex: {
@@ -214,23 +161,16 @@ export const BOARD_GEOMETRY_DEFINITIONS: Record<
   },
 };
 
-export function getBoardGeometryDefinition(
-  geometry: BoardGeometry,
-): BoardGeometryDefinition {
+export function getBoardGeometryDefinition(geometry: BoardGeometry): BoardGeometryDefinition {
   return BOARD_GEOMETRY_DEFINITIONS[geometry];
 }
 
 export function geometryFromNodeTags(tags: readonly string[]): BoardGeometry {
-  return (
-    BOARD_GEOMETRIES.find(
-      (geometry) => tags.includes(BOARD_GEOMETRY_DEFINITIONS[geometry].nodeTag),
-    ) ?? "square"
-  );
+  return BOARD_GEOMETRIES.find(
+    (geometry) => tags.includes(BOARD_GEOMETRY_DEFINITIONS[geometry].nodeTag),
+  ) ?? "square";
 }
 
-export function createBoardTopology({
-  geometry = "square",
-  ...options
-}: BoardTopologyOptions): BoardTopology {
+export function createBoardTopology({ geometry = "square", ...options }: BoardTopologyOptions): BoardTopology {
   return getBoardGeometryDefinition(geometry).create(options);
 }

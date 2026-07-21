@@ -1,6 +1,12 @@
 import { cloneState } from "./state";
 import type { GameState, HistoryState } from "./types";
 
+const HISTORY_LIMIT = 256;
+
+function appendPast(past: readonly GameState[], state: Readonly<GameState>): GameState[] {
+  return [...past, cloneState(state)].slice(-HISTORY_LIMIT);
+}
+
 export function createHistory(initial: Readonly<GameState>): HistoryState {
   return { past: [], present: cloneState(initial), future: [] };
 }
@@ -10,7 +16,7 @@ export function commitHistory(
   next: Readonly<GameState>,
 ): HistoryState {
   return {
-    past: [...history.past, cloneState(history.present)],
+    past: appendPast(history.past, history.present),
     present: cloneState(next),
     future: [],
   };
@@ -30,7 +36,7 @@ export function redoHistory(history: Readonly<HistoryState>): HistoryState {
   const [next, ...future] = history.future;
   if (!next) return structuredClone(history) as HistoryState;
   return {
-    past: [...history.past.map(cloneState), cloneState(history.present)],
+    past: appendPast(history.past.map(cloneState), history.present),
     present: cloneState(next),
     future: future.map(cloneState),
   };

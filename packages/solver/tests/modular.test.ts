@@ -130,6 +130,57 @@ describe("modular linear algebra", () => {
 });
 
 describe("automatic solver selection", () => {
+  it.each(["square", "hex", "triangle"] as const)(
+    "derives the influence matrix from the %s topology through Engine API",
+    (geometry) => {
+      const mechanics = createStandardRegistry();
+      const { initialState, ruleset } = createExperiment({
+        size: 4,
+        geometry,
+        stateCount: 3,
+        defaultInfluence: "neighbors",
+        seed: 63,
+      });
+      const result = solvePuzzle(initialState, ruleset, mechanics);
+      expect(result.status).toBe("solved");
+      let state = initialState;
+      for (const anchorEntityId of result.presses) {
+        state = dispatch(
+          { ...state, status: "playing" },
+          { type: "activate", anchorEntityId },
+          ruleset,
+          mechanics,
+        ).state;
+      }
+      expect(state.status).toBe("won");
+    },
+  );
+
+  it.each([3, 4])("solves heterogeneous influences against a partial %i-state target", (stateCount) => {
+    const mechanics = createStandardRegistry();
+    const { initialState, ruleset } = createExperiment({
+      size: 3,
+      stateCount,
+      defaultInfluence: "cross",
+      compositeInfluence: true,
+      influenceOverrides: { "n:1:1": "king", "n:0:0": "diagonal" },
+      goalValues: { "n:0:0": 2, "n:1:1": 1, "n:2:2": 0 },
+      seed: 81,
+    });
+    const result = solvePuzzle(initialState, ruleset, mechanics);
+    expect(result.status).toBe("solved");
+    let state = initialState;
+    for (const anchorEntityId of result.presses) {
+      state = dispatch(
+        { ...state, status: "playing" },
+        { type: "activate", anchorEntityId },
+        ruleset,
+        mechanics,
+      ).state;
+    }
+    expect(state.status).toBe("won");
+  });
+
   it.each([
     [2, "prime-field-linear"],
     [3, "prime-field-linear"],
@@ -142,9 +193,12 @@ describe("automatic solver selection", () => {
     const { initialState, ruleset } = createExperiment({
       size: 4,
       stateCount,
-      goalValue: stateCount - 1,
-      influence: "king",
-      boardShape: "diamond",
+      defaultInfluence: "king",
+      goalValues: Object.fromEntries(
+        Array.from({ length: 4 }, (_, y) =>
+          Array.from({ length: 4 }, (_, x) => [`n:${x}:${y}`, stateCount - 1] as const),
+        ).flat(),
+      ),
       seed: 27,
     });
     const result = solvePuzzle(initialState, ruleset, mechanics, solvers);
@@ -166,5 +220,26 @@ describe("automatic solver selection", () => {
         (entity) => entity.channels.power === stateCount - 1,
       ),
     ).toBe(true);
+  });
+
+  it("builds the additive model only once while selecting the modulo-four solver", () => {
+    const mechanics = createStandardRegistry();
+    const selector = mechanics.selectors.get("anchor-influence");
+    expect(selector).toBeDefined();
+    if (!selector) return;
+    let targetQueries = 0;
+    mechanics.selectors.set("anchor-influence", (context) => {
+      targetQueries += 1;
+      return selector(context);
+    });
+    const { initialState, ruleset } = createExperiment({
+      size: 3,
+      stateCount: 4,
+      defaultInfluence: "cross",
+      seed: 13,
+    });
+
+    expect(solvePuzzle(initialState, ruleset, mechanics).status).toBe("solved");
+    expect(targetQueries).toBe(Object.keys(initialState.entities).length);
   });
 });

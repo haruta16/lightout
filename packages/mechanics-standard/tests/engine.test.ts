@@ -4,8 +4,9 @@ import {
   commitHistory,
   createHistory,
   dispatch,
+  evaluateState,
   redoHistory,
-  stableStateKey,
+  stableEntityStateKey,
   undoHistory,
   validateGameState,
   type GameState,
@@ -15,19 +16,24 @@ import {
   createExperiment,
   createHexTopology,
   createRectTopology,
-  createTriangleTopology,
   createStandardRegistry,
+  createTriangleTopology,
+  influenceTargetsForAnchor,
   supportedInfluencesFor,
 } from "../src";
 
 describe("headless engine with standard mechanics", () => {
-  it("models square, hex, and triangle neighborhoods independently from rendering", () => {
+  it("keeps square, hex, and triangle topologies while removing shape clipping", () => {
     const square = createRectTopology({ width: 3, height: 3 });
     const hex = createHexTopology({ width: 3, height: 3 });
     const triangle = createTriangleTopology({ width: 3, height: 3 });
     const squareNeighbors = square.edges.filter(
       (edge) => edge.from === "n:1:1" && edge.relation === "adjacent",
     );
+    const squareOrthogonal = square.edges
+      .filter((edge) => edge.from === "n:1:1" && edge.relation === "orthogonal")
+      .map((edge) => edge.to)
+      .sort();
     const hexNeighbors = hex.edges.filter(
       (edge) => edge.from === "n:1:1" && edge.relation === "adjacent",
     );
@@ -36,64 +42,127 @@ describe("headless engine with standard mechanics", () => {
     );
 
     expect(squareNeighbors).toHaveLength(8);
+    expect(squareOrthogonal).toEqual(["n:0:1", "n:1:0", "n:1:2", "n:2:1"]);
     expect(hexNeighbors).toHaveLength(6);
     expect(triangleNeighbors).toHaveLength(3);
+    expect(Object.keys(square.nodes)).toHaveLength(9);
+    expect(Object.keys(hex.nodes)).toHaveLength(9);
+    expect(Object.keys(triangle.nodes)).toHaveLength(9);
     expect(square.nodes["n:1:1"]?.tags).toContain("geometry:square");
     expect(hex.nodes["n:1:1"]?.tags).toContain("geometry:hex");
     expect(triangle.nodes["n:1:1"]?.tags).toContain("geometry:triangle");
-    expect(supportedInfluencesFor("square")).toEqual([
-      "cross",
-      "diagonal",
-      "king",
-      "neighbors",
-      "row-column",
-    ]);
+    expect(supportedInfluencesFor("square")).toEqual(["cross", "diagonal", "king", "neighbors", "row-column"]);
     expect(supportedInfluencesFor("hex")).toEqual(["neighbors"]);
     expect(supportedInfluencesFor("triangle")).toEqual(["neighbors"]);
   });
 
-  it("uses all six adjacent hex nodes for the sixfold rule", () => {
+  it.each([
+    ["hex", 7],
+    ["triangle", 4],
+  ] as const)("uses the complete %s neighborhood", (geometry, changedCount) => {
+    const registry = createStandardRegistry();
+    const { initialState, ruleset } = createExperiment({
+      size: 3,
+      geometry,
+      stateCount: 3,
+      defaultInfluence: "neighbors",
+      seed: 15,
+    });
+    const result = dispatch(
+      initialState,
+      { type: "activate", anchorEntityId: "light:n:1:1" },
+      ruleset,
+      registry,
+    );
+    expect(result.events.filter((event) => event.type === "channel-changed")).toHaveLength(changedCount);
+  });
+
+  it("lets neighboring cells use different influence mechanics", () => {
     const registry = createStandardRegistry();
     const { initialState, ruleset } = createExperiment({
       size: 3,
       stateCount: 3,
-      goalValue: 0,
-      influence: "neighbors",
-      boardShape: "full",
-      geometry: "hex",
+      defaultInfluence: "cross",
+      compositeInfluence: true,
+      influenceOverrides: { "n:1:1": "king", "n:0:0": "diagonal" },
       seed: 12,
     });
 
-    const result = dispatch(
+    const center = dispatch(
       initialState,
       { type: "activate", anchorEntityId: "light:n:1:1" },
       ruleset,
       registry,
     );
-    const changed = result.events.filter((event) => event.type === "channel-changed");
-    expect(changed).toHaveLength(7);
+    const corner = dispatch(
+      initialState,
+      { type: "activate", anchorEntityId: "light:n:0:0" },
+      ruleset,
+      registry,
+    );
+    expect(center.events.filter((event) => event.type === "channel-changed")).toHaveLength(9);
+    expect(corner.events.filter((event) => event.type === "channel-changed")).toHaveLength(2);
   });
 
-  it("uses all three edge-adjacent nodes for the triangle rule", () => {
+  it("uses the shared topology resolver for cross and row-column influences", () => {
+    const { initialState } = createExperiment({
+      size: 4,
+      stateCount: 2,
+      defaultInfluence: "cross",
+      compositeInfluence: true,
+      influenceOverrides: { "n:1:1": "row-column" },
+      initialValues: {},
+      seed: 1,
+    });
+    const rowColumnAnchor = initialState.entities["light:n:1:1"];
+    const crossAnchor = initialState.entities["light:n:2:2"];
+
+    expect(rowColumnAnchor).toBeDefined();
+    expect(crossAnchor).toBeDefined();
+    if (!rowColumnAnchor || !crossAnchor) return;
+
+    expect(influenceTargetsForAnchor(initialState, rowColumnAnchor)).toHaveLength(7);
+    expect(influenceTargetsForAnchor(initialState, crossAnchor)).toHaveLength(5);
+  });
+
+  it("ignores per-cell overrides until composite influence is enabled", () => {
+    const uniform = createExperiment({
+      size: 3,
+      stateCount: 2,
+      defaultInfluence: "cross",
+      influenceOverrides: { "n:1:1": "king" },
+      initialValues: {},
+      seed: 1,
+    });
+    const composite = createExperiment({
+      size: 3,
+      stateCount: 2,
+      defaultInfluence: "cross",
+      compositeInfluence: true,
+      influenceOverrides: { "n:1:1": "king" },
+      initialValues: {},
+      seed: 1,
+    });
+
+    expect(uniform.initialState.entities["light:n:1:1"]?.channels.influence).toBe("cross");
+    expect(composite.initialState.entities["light:n:1:1"]?.channels.influence).toBe("king");
+  });
+
+  it("evaluates arbitrary and partial per-cell goal constraints", () => {
     const registry = createStandardRegistry();
     const { initialState, ruleset } = createExperiment({
       size: 3,
       stateCount: 3,
-      goalValue: 0,
-      influence: "neighbors",
-      boardShape: "full",
-      geometry: "triangle",
-      seed: 15,
+      defaultInfluence: "cross",
+      initialValues: { "n:0:0": 2, "n:2:2": 1 },
+      goalValues: { "n:0:0": 2, "n:1:1": 0 },
+      seed: 5,
     });
+    expect(initialState.entities["light:n:2:2"]?.channels.goal).toBe(-1);
+    expect(evaluateState(initialState, ruleset, registry).status).toBe("won");
 
-    const result = dispatch(
-      initialState,
-      { type: "activate", anchorEntityId: "light:n:1:1" },
-      ruleset,
-      registry,
-    );
-    const changed = result.events.filter((event) => event.type === "channel-changed");
-    expect(changed).toHaveLength(4);
+    initialState.entities["light:n:1:1"]!.channels.power = 1;
+    expect(evaluateState(initialState, ruleset, registry).status).toBe("playing");
   });
 
   it("restores a binary state when the same switch is activated twice", () => {
@@ -101,13 +170,11 @@ describe("headless engine with standard mechanics", () => {
     const { initialState, ruleset } = createExperiment({
       size: 5,
       stateCount: 2,
-      goalValue: 0,
-      influence: "cross",
-      boardShape: "full",
+      defaultInfluence: "cross",
       seed: 42,
     });
     const anchorEntityId = Object.keys(initialState.entities)[0];
-    const before = stableStateKey(initialState);
+    const before = stableEntityStateKey(initialState);
     const once = dispatch(
       initialState,
       { type: "activate", anchorEntityId },
@@ -121,7 +188,7 @@ describe("headless engine with standard mechanics", () => {
       registry,
     );
     expect(once.accepted).toBe(true);
-    expect(stableStateKey(twice.state)).toBe(before);
+    expect(stableEntityStateKey(twice.state)).toBe(before);
   });
 
   it("keeps undo and redo as snapshots independent of render events", () => {
@@ -129,9 +196,7 @@ describe("headless engine with standard mechanics", () => {
     const { initialState, ruleset } = createExperiment({
       size: 3,
       stateCount: 2,
-      goalValue: 0,
-      influence: "cross",
-      boardShape: "full",
+      defaultInfluence: "cross",
       seed: 9,
     });
     const anchorEntityId = Object.keys(initialState.entities)[0];
@@ -144,17 +209,30 @@ describe("headless engine with standard mechanics", () => {
     const committed = commitHistory(createHistory(initialState), result.state);
     const undone = undoHistory(committed);
     const redone = redoHistory(undone);
-    expect(stableStateKey(undone.present)).toBe(stableStateKey(initialState));
-    expect(stableStateKey(redone.present)).toBe(stableStateKey(result.state));
+    expect(stableEntityStateKey(undone.present)).toBe(stableEntityStateKey(initialState));
+    expect(stableEntityStateKey(redone.present)).toBe(stableEntityStateKey(result.state));
+  });
+
+  it("bounds snapshot history during long editor sessions", () => {
+    const { initialState } = createExperiment({
+      size: 2,
+      stateCount: 2,
+      defaultInfluence: "cross",
+      seed: 1,
+    });
+    let history = createHistory(initialState);
+    for (let turn = 1; turn <= 300; turn += 1) {
+      history = commitHistory(history, { ...history.present, turn });
+    }
+
+    expect(history.past).toHaveLength(256);
   });
 
   it("rejects channel values outside the ruleset schema", () => {
     const { initialState, ruleset } = createExperiment({
       size: 3,
       stateCount: 2,
-      goalValue: 0,
-      influence: "cross",
-      boardShape: "full",
+      defaultInfluence: "cross",
       seed: 3,
     });
     const first = Object.values(initialState.entities)[0];
@@ -197,13 +275,44 @@ describe("headless engine with standard mechanics", () => {
     );
   });
 
+  it("validates board identity and edge integrity", () => {
+    const state: GameState = {
+      schemaVersion: 1,
+      board: {
+        nodes: {
+          a: { id: "different", position: { x: 0, y: 0 }, tags: [] },
+        },
+        edges: [
+          { from: "a", to: "missing", relation: "adjacent" },
+          { from: "a", to: "missing", relation: "adjacent" },
+        ],
+      },
+      entities: {},
+      counters: {},
+      inventory: {},
+      turn: 0,
+      status: "playing",
+      seed: 0,
+    };
+    const ruleset: Ruleset = {
+      id: "invalid-board",
+      name: "Invalid board",
+      actions: [],
+      goals: [],
+      settleSystems: [],
+    };
+
+    const errors = validateGameState(state, ruleset);
+    expect(errors).toContain("Board node key does not match id: a != different");
+    expect(errors).toContain("Board edge references unknown target: missing");
+    expect(errors).toContain("Board contains a duplicate edge: a -> missing (adjacent)");
+  });
+
   it("does not emit movement events for a no-op move", () => {
     const { initialState } = createExperiment({
       size: 2,
       stateCount: 2,
-      goalValue: 0,
-      influence: "cross",
-      boardShape: "full",
+      defaultInfluence: "cross",
       seed: 1,
     });
     const entity = Object.values(initialState.entities)[0];
@@ -221,6 +330,9 @@ describe("headless engine with standard mechanics", () => {
     const registry = createStandardRegistry();
     const gravity = registry.systems.get("gravity-down");
     const board = createRectTopology({ width: 1, height: 3 });
+    board.nodes["n:0:0"]!.position = { x: 30, y: 20 };
+    board.nodes["n:0:1"]!.position = { x: -10, y: 90 };
+    board.nodes["n:0:2"]!.position = { x: 7, y: -40 };
     const state: GameState = {
       schemaVersion: 1,
       board,
@@ -264,9 +376,7 @@ describe("headless engine with standard mechanics", () => {
     const { initialState } = createExperiment({
       size: 2,
       stateCount: 2,
-      goalValue: 0,
-      influence: "diagonal",
-      boardShape: "full",
+      defaultInfluence: "diagonal",
       seed: 2,
     });
 

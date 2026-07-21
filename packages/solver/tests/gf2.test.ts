@@ -4,7 +4,7 @@ import {
   createExperiment,
   createStandardRegistry,
 } from "@lightout/mechanics-standard";
-import { solveBinaryToggle } from "../src";
+import { solvePuzzle } from "../src";
 
 describe("GF(2) solver", () => {
   it("solves a generated classic board through the public engine API", () => {
@@ -12,12 +12,10 @@ describe("GF(2) solver", () => {
     const { initialState, ruleset } = createExperiment({
       size: 5,
       stateCount: 2,
-      goalValue: 0,
-      influence: "cross",
-      boardShape: "full",
+      defaultInfluence: "cross",
       seed: 20260715,
     });
-    const solution = solveBinaryToggle(initialState, ruleset, registry);
+    const solution = solvePuzzle(initialState, ruleset, registry);
     expect(solution.status).toBe("solved");
     let state = initialState;
     for (const anchorEntityId of solution.presses) {
@@ -31,29 +29,12 @@ describe("GF(2) solver", () => {
     expect(state.status).toBe("won");
   });
 
-  it("declines unsupported multi-state experiments explicitly", () => {
-    const registry = createStandardRegistry();
-    const { initialState, ruleset } = createExperiment({
-      size: 3,
-      stateCount: 3,
-      goalValue: 0,
-      influence: "cross",
-      boardShape: "full",
-      seed: 1,
-    });
-    expect(solveBinaryToggle(initialState, ruleset, registry).status).toBe(
-      "unsupported",
-    );
-  });
-
   it("declines binary actions that do not actually toggle state", () => {
     const registry = createStandardRegistry();
     const { initialState, ruleset } = createExperiment({
       size: 3,
       stateCount: 2,
-      goalValue: 0,
-      influence: "cross",
-      boardShape: "full",
+      defaultInfluence: "cross",
       seed: 4,
     });
     const nonToggleRuleset = {
@@ -73,7 +54,7 @@ describe("GF(2) solver", () => {
       ),
     };
 
-    const result = solveBinaryToggle(initialState, nonToggleRuleset, registry);
+    const result = solvePuzzle(initialState, nonToggleRuleset, registry);
     expect(result.status).toBe("unsupported");
     expect(result.presses).toEqual([]);
   });
@@ -83,9 +64,7 @@ describe("GF(2) solver", () => {
     const { initialState, ruleset } = createExperiment({
       size: 2,
       stateCount: 2,
-      goalValue: 0,
-      influence: "diagonal",
-      boardShape: "full",
+      defaultInfluence: "diagonal",
       seed: 1,
     });
     for (const entity of Object.values(initialState.entities)) {
@@ -95,7 +74,7 @@ describe("GF(2) solver", () => {
     expect(first).toBeDefined();
     if (first) first.channels.power = 1;
 
-    const result = solveBinaryToggle(initialState, ruleset, registry);
+    const result = solvePuzzle(initialState, ruleset, registry);
     expect(result.status).toBe("unsolvable");
     expect(result.minimal).toBe(false);
   });

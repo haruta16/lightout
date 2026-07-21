@@ -1,54 +1,22 @@
-import type {
-  GameEntity,
-  GameState,
-  JsonValue,
-  Ruleset,
-} from "@lightout/engine";
+import type { GameEntity, GameState, JsonValue, Ruleset } from "@lightout/engine";
 import {
-  createBoardTopology,
-  getBoardGeometryDefinition,
-  type BoardGeometry,
-  type BoardShape,
-} from "./topology";
-
-export const INFLUENCE_DEFINITIONS = {
-  cross: { relations: ["orthogonal"] },
-  diagonal: { relations: ["diagonal"] },
-  king: { relations: ["orthogonal", "diagonal"] },
-  neighbors: { relations: ["adjacent"] },
-  "row-column": { relations: ["same-row", "same-column"] },
-} as const;
-
-export type InfluencePattern = keyof typeof INFLUENCE_DEFINITIONS;
-export const INFLUENCE_PATTERNS = Object.keys(
-  INFLUENCE_DEFINITIONS,
-) as InfluencePattern[];
+  influenceTargetsForAnchor,
+  isInfluencePattern,
+  supportedInfluencesFor,
+  type InfluencePattern,
+} from "./influence";
+import { createBoardTopology, type BoardGeometry } from "./topology";
 
 export interface ExperimentConfig {
   size: number;
   stateCount: number;
-  goalValue: number;
-  influence: InfluencePattern;
-  boardShape: BoardShape;
   geometry?: BoardGeometry;
+  defaultInfluence: InfluencePattern;
+  compositeInfluence?: boolean;
   seed: number;
-}
-
-export function relationsFor(pattern: InfluencePattern): string[] {
-  return [...INFLUENCE_DEFINITIONS[pattern].relations];
-}
-
-export function supportedInfluencesFor(
-  geometry: BoardGeometry,
-): InfluencePattern[] {
-  const supportedRelations = new Set(
-    getBoardGeometryDefinition(geometry).supportedRelations,
-  );
-  return INFLUENCE_PATTERNS.filter((pattern) =>
-    INFLUENCE_DEFINITIONS[pattern].relations.every((relation) =>
-      supportedRelations.has(relation),
-    ),
-  );
+  initialValues?: Record<string, number>;
+  goalValues?: Record<string, number | null>;
+  influenceOverrides?: Record<string, InfluencePattern>;
 }
 
 function random(seed: number): () => number {
@@ -62,21 +30,10 @@ function random(seed: number): () => number {
   };
 }
 
-function affectedEntityIds(
-  state: GameState,
-  anchor: GameEntity,
-  relations: readonly string[],
-): string[] {
-  if (!anchor.nodeId) return [];
-  const nodeIds = new Set([anchor.nodeId]);
-  for (const edge of state.board.edges) {
-    if (edge.from === anchor.nodeId && relations.includes(edge.relation)) {
-      nodeIds.add(edge.to);
-    }
-  }
-  return Object.values(state.entities)
-    .filter((entity) => entity.nodeId && nodeIds.has(entity.nodeId))
-    .map((entity) => entity.id);
+function normalizedState(value: unknown, stateCount: number, fallback: number): number {
+  return typeof value === "number" && Number.isInteger(value)
+    ? ((value % stateCount) + stateCount) % stateCount
+    : fallback;
 }
 
 export function createExperiment(config: ExperimentConfig): {
@@ -85,25 +42,38 @@ export function createExperiment(config: ExperimentConfig): {
 } {
   const size = Math.max(2, Math.min(12, Math.floor(config.size)));
   const stateCount = Math.max(2, Math.min(7, Math.floor(config.stateCount)));
-  const goalValue = ((config.goalValue % stateCount) + stateCount) % stateCount;
   const geometry = config.geometry ?? "square";
-  const board = createBoardTopology({
-    width: size,
-    height: size,
-    shape: config.boardShape,
-    geometry,
-  });
+  const supportedInfluences = supportedInfluencesFor(geometry);
+  const defaultInfluence = isInfluencePattern(config.defaultInfluence) &&
+    supportedInfluences.includes(config.defaultInfluence)
+    ? config.defaultInfluence
+    : supportedInfluences[0] ?? "neighbors";
+  const board = createBoardTopology({ width: size, height: size, geometry });
   const entities: Record<string, GameEntity> = {};
+
   for (const node of Object.values(board.nodes)) {
     const id = `light:${node.id}`;
+    const configuredGoal = config.goalValues?.[node.id];
+    const goal = config.goalValues && !(node.id in config.goalValues)
+      ? -1
+      : configuredGoal === null
+      ? -1
+      : normalizedState(configuredGoal, stateCount, 0);
+    const override = config.compositeInfluence
+      ? config.influenceOverrides?.[node.id]
+      : undefined;
+    const influence = isInfluencePattern(override) && supportedInfluences.includes(override)
+      ? override
+      : defaultInfluence;
     entities[id] = {
       id,
       kind: "light",
       nodeId: node.id,
       tags: ["interactive", "light"],
-      channels: { power: goalValue },
+      channels: { power: goal < 0 ? 0 : goal, goal, influence },
     };
   }
+
   const initialState: GameState = {
     schemaVersion: 1,
     board,
@@ -115,24 +85,37 @@ export function createExperiment(config: ExperimentConfig): {
     seed: config.seed,
   };
 
-  const relations = relationsFor(config.influence);
-  const rng = random(config.seed);
-  const entityList = Object.values(initialState.entities);
-  for (const anchor of entityList) {
-    const presses = Math.floor(rng() * stateCount);
-    if (presses === 0) continue;
-    for (const entityId of affectedEntityIds(initialState, anchor, relations)) {
-      const entity = initialState.entities[entityId];
-      if (!entity) continue;
-      const current = Number(entity.channels.power ?? 0);
-      entity.channels.power = (current + presses) % stateCount;
+  if (config.initialValues) {
+    for (const entity of Object.values(initialState.entities)) {
+      if (!entity.nodeId) continue;
+      entity.channels.power = normalizedState(
+        config.initialValues[entity.nodeId],
+        stateCount,
+        0,
+      );
+    }
+  } else {
+    const rng = random(config.seed);
+    for (const anchor of Object.values(initialState.entities)) {
+      const presses = Math.floor(rng() * stateCount);
+      for (const entityId of influenceTargetsForAnchor(initialState, anchor)) {
+        const entity = initialState.entities[entityId];
+        if (!entity) continue;
+        const current = Number(entity.channels.power ?? 0);
+        entity.channels.power = (current + presses) % stateCount;
+      }
     }
   }
-  const generatedGoalState = entityList.every(
-    (entity) => entity.channels.power === goalValue,
+
+  const constrained = Object.values(initialState.entities).filter(
+    (entity) => Number(entity.channels.goal) >= 0,
   );
-  if (generatedGoalState && entityList[0]) {
-    for (const entityId of affectedEntityIds(initialState, entityList[0], relations)) {
+  const generatedAtGoal = constrained.length > 0 && constrained.every(
+    (entity) => entity.channels.power === entity.channels.goal,
+  );
+  const first = Object.values(initialState.entities)[0];
+  if (!config.initialValues && generatedAtGoal && first) {
+    for (const entityId of influenceTargetsForAnchor(initialState, first)) {
       const entity = initialState.entities[entityId];
       if (entity) entity.channels.power = (Number(entity.channels.power) + 1) % stateCount;
     }
@@ -140,23 +123,19 @@ export function createExperiment(config: ExperimentConfig): {
 
   const metadata: Record<string, JsonValue> = {
     stateCount,
-    goalValue,
-    influence: config.influence,
-    boardShape: config.boardShape,
+    defaultInfluence,
+    compositeInfluence: config.compositeInfluence === true,
     geometry,
   };
   const ruleset: Ruleset = {
-    id: `experiment:${geometry}:${config.influence}:${stateCount}`,
+    id: `experiment:heterogeneous:${stateCount}`,
     name: "Switch Toggling Experiment",
     entityKinds: {
       light: {
         requiredChannels: {
-          power: {
-            type: "number",
-            integer: true,
-            min: 0,
-            max: stateCount - 1,
-          },
+          power: { type: "number", integer: true, min: 0, max: stateCount - 1 },
+          goal: { type: "number", integer: true, min: -1, max: stateCount - 1 },
+          influence: { type: "string", values: ["cross", "diagonal", "king", "neighbors", "row-column"] },
         },
         allowAdditionalChannels: false,
       },
@@ -166,8 +145,8 @@ export function createExperiment(config: ExperimentConfig): {
         id: "activate-light",
         commandType: "activate",
         selector: {
-          type: "graph-neighborhood",
-          params: { relations, includeSelf: true, kind: "light" },
+          type: "anchor-influence",
+          params: { channel: "influence", includeSelf: true, kind: "light" },
         },
         effects: [
           {
@@ -176,22 +155,16 @@ export function createExperiment(config: ExperimentConfig): {
           },
         ],
       },
-      {
-        id: "set-light",
-        commandType: "set-state",
-        selector: { type: "self", params: { kind: "light" } },
-        effects: [
-          {
-            type: "set-channel",
-            params: { channel: "power", payloadKey: "value" },
-          },
-        ],
-      },
     ],
     goals: [
       {
-        type: "all-channel-equals",
-        params: { kind: "light", channel: "power", value: goalValue },
+        type: "channels-match",
+        params: {
+          kind: "light",
+          actualChannel: "power",
+          targetChannel: "goal",
+          ignoreValue: -1,
+        },
       },
     ],
     settleSystems: [],

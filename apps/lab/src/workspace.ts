@@ -1,42 +1,43 @@
-import type {
-  BoardGeometry,
-  BoardShape,
-  ExperimentConfig,
-  InfluencePattern,
-} from "@lightout/mechanics-standard";
+import type { GameState } from "@lightout/engine";
+import type { BoardGeometry, ExperimentConfig, InfluencePattern } from "@lightout/mechanics-standard";
 import {
   BOARD_GEOMETRIES,
   INFLUENCE_PATTERNS,
+  isInfluencePattern,
+  parseNodeId,
   supportedInfluencesFor,
 } from "@lightout/mechanics-standard";
 
 export type WorkspaceMode = "play" | "edit";
 export type EditorTool = "inspect" | "paint" | "cycle";
+export type EditorSurface = "initial" | "goal" | "influence";
 export type Theme = "light" | "dark";
+
 export interface RuleDefinitionConfig {
   stateCount: number;
-  goalValue: number;
-  influence: InfluencePattern;
+  defaultInfluence: InfluencePattern;
+  compositeInfluence: boolean;
 }
 
 export interface LevelDefaults {
   size: number;
-  boardShape: BoardShape;
   geometry: BoardGeometry;
   seed: number;
+  initialValues?: Record<string, number>;
+  goalValues?: Record<string, number | null>;
+  influenceOverrides?: Record<string, InfluencePattern>;
 }
 
 export interface RulePreset {
   id: string;
   name: string;
   description: string;
-  accent: string;
   definition: RuleDefinitionConfig;
   level: LevelDefaults;
 }
 
 interface StoredWorkspace {
-  version: 2;
+  version: 5;
   activeRuleId: string;
   presets: RulePreset[];
 }
@@ -47,57 +48,85 @@ export interface InitialWorkspace {
 }
 
 const STORAGE_KEY = "lightout-rule-workspace-v1";
-const BOARD_SHAPES: BoardShape[] = ["full", "diamond", "ring"];
-const SHOWCASE_RULE_IDS = ["hex-sixfold", "triangle-tripoint"] as const;
+const CURRENT_WORKSPACE_VERSION = 5 as const;
+
+function checkerInfluences(size: number): Record<string, InfluencePattern> {
+  const values: Record<string, InfluencePattern> = {};
+  for (let y = 0; y < size; y += 1) {
+    for (let x = 0; x < size; x += 1) {
+      if ((x + y) % 3 === 1) values[`n:${x}:${y}`] = "diagonal";
+      if ((x + y) % 3 === 2) values[`n:${x}:${y}`] = "king";
+    }
+  }
+  return values;
+}
+
+function constellationGoals(size: number): Record<string, number | null> {
+  const values: Record<string, number | null> = {};
+  const center = Math.floor(size / 2);
+  for (let y = 0; y < size; y += 1) {
+    for (let x = 0; x < size; x += 1) {
+      values[`n:${x}:${y}`] = x === center || y === center ? (x + y) % 3 : null;
+    }
+  }
+  return values;
+}
 
 export const DEFAULT_RULE_PRESETS: RulePreset[] = [
   {
     id: "classic-cross",
     name: "经典十字联动",
-    description: "最纯粹的二态开关联动，也是所有实验的基准线。",
-    accent: "#f1b85b",
-    definition: { stateCount: 2, goalValue: 0, influence: "cross" },
-    level: { size: 5, boardShape: "full", geometry: "square", seed: 27183 },
+    description: "二态方阵基准规则，每格使用相同的十字影响。",
+    definition: { stateCount: 2, defaultInfluence: "cross", compositeInfluence: false },
+    level: { size: 5, geometry: "square", seed: 27183 },
   },
   {
     id: "prism-field",
     name: "棱镜场",
-    description: "三态八方向传播，适合观察自由度与局面密度。",
-    accent: "#55d6b5",
-    definition: { stateCount: 3, goalValue: 0, influence: "king" },
-    level: { size: 6, boardShape: "diamond", geometry: "square", seed: 73021 },
+    description: "三态八方向传播，用于观察自由度与局面密度。",
+    definition: { stateCount: 3, defaultInfluence: "king", compositeInfluence: false },
+    level: { size: 6, geometry: "square", seed: 73021 },
   },
   {
-    id: "orbital-ring",
-    name: "轨道回路",
-    description: "四态环形棋盘，以整行整列形成长距离耦合。",
-    accent: "#ff7b6e",
-    definition: { stateCount: 4, goalValue: 0, influence: "row-column" },
-    level: { size: 7, boardShape: "ring", geometry: "square", seed: 44017 },
+    id: "long-coupling",
+    name: "纵横耦合",
+    description: "四态整行整列影响，形成跨越棋盘的长距离联动。",
+    definition: { stateCount: 4, defaultInfluence: "row-column", compositeInfluence: false },
+    level: { size: 7, geometry: "square", seed: 44017 },
+  },
+  {
+    id: "heterogeneous-grid",
+    name: "异构星图",
+    description: "同一方阵混合十字、对角与八方向影响，并使用部分目标约束。",
+    definition: { stateCount: 3, defaultInfluence: "cross", compositeInfluence: true },
+    level: {
+      size: 5,
+      geometry: "square",
+      seed: 31415,
+      goalValues: constellationGoals(5),
+      influenceOverrides: checkerInfluences(5),
+    },
   },
   {
     id: "diagonal-spectrum",
     name: "对角光谱",
     description: "五态对角影响，用更丰富的按压次数检验线性结构。",
-    accent: "#93a6ff",
-    definition: { stateCount: 5, goalValue: 0, influence: "diagonal" },
-    level: { size: 5, boardShape: "full", geometry: "square", seed: 9907 },
+    definition: { stateCount: 5, defaultInfluence: "diagonal", compositeInfluence: false },
+    level: { size: 5, geometry: "square", seed: 9907 },
   },
   {
     id: "hex-sixfold",
     name: "六域回响",
-    description: "六边形拓扑，每个内部节点与周围六个方向联动。",
-    accent: "#42cbb4",
-    definition: { stateCount: 3, goalValue: 0, influence: "neighbors" },
-    level: { size: 6, boardShape: "full", geometry: "hex", seed: 61803 },
+    description: "六边形拓扑，每个内部节点沿六个方向联动。",
+    definition: { stateCount: 3, defaultInfluence: "neighbors", compositeInfluence: false },
+    level: { size: 6, geometry: "hex", seed: 61803 },
   },
   {
     id: "triangle-tripoint",
     name: "三相回路",
     description: "交错三角拓扑，每个内部节点沿三条共边方向联动。",
-    accent: "#c58cff",
-    definition: { stateCount: 3, goalValue: 0, influence: "neighbors" },
-    level: { size: 6, boardShape: "full", geometry: "triangle", seed: 31415 },
+    definition: { stateCount: 3, defaultInfluence: "neighbors", compositeInfluence: false },
+    level: { size: 6, geometry: "triangle", seed: 31415 },
   },
 ];
 
@@ -105,47 +134,107 @@ function cloneDefaults(): RulePreset[] {
   return structuredClone(DEFAULT_RULE_PRESETS) as RulePreset[];
 }
 
+function isNodeIdWithin(value: string, size: number): boolean {
+  const coordinate = parseNodeId(value);
+  if (!coordinate) return false;
+  const { x, y } = coordinate;
+  return x >= 0 && y >= 0 && x < size && y < size;
+}
+
+function numberMap(
+  value: unknown,
+  size: number,
+  stateCount: number,
+  allowNull: boolean,
+): Record<string, number | null> | undefined {
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const result: Record<string, number | null> = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (!isNodeIdWithin(key, size)) return undefined;
+    if (allowNull && item === null) result[key] = null;
+    else if (typeof item === "number" && Number.isInteger(item) && item >= 0 && item < stateCount) {
+      result[key] = item;
+    } else return undefined;
+  }
+  return result;
+}
+
+function influenceMap(
+  value: unknown,
+  size: number,
+): Record<string, InfluencePattern> | undefined {
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const result: Record<string, InfluencePattern> = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (!isNodeIdWithin(key, size) || !isInfluencePattern(item)) return undefined;
+    result[key] = item;
+  }
+  return result;
+}
+
 function normalizePreset(value: unknown): RulePreset | null {
   if (!value || typeof value !== "object") return null;
-  const preset = value as Partial<RulePreset>;
-  const valid =
-    typeof preset.id === "string" &&
-    preset.id.length > 0 &&
-    typeof preset.name === "string" &&
-    typeof preset.description === "string" &&
-    typeof preset.accent === "string" &&
-    !!preset.definition &&
-    Number.isInteger(preset.definition.stateCount) &&
-    preset.definition.stateCount >= 2 &&
-    preset.definition.stateCount <= 5 &&
-    Number.isInteger(preset.definition.goalValue) &&
-    preset.definition.goalValue >= 0 &&
-    preset.definition.goalValue < preset.definition.stateCount &&
-    INFLUENCE_PATTERNS.includes(preset.definition.influence as InfluencePattern) &&
-    !!preset.level &&
-    Number.isInteger(preset.level.size) &&
-    preset.level.size >= 2 &&
-    preset.level.size <= 10 &&
-    Number.isInteger(preset.level.seed) &&
-    preset.level.seed >= 0 &&
-    BOARD_SHAPES.includes(preset.level.boardShape as BoardShape) &&
-    (preset.level.geometry === undefined ||
-      BOARD_GEOMETRIES.includes(preset.level.geometry as BoardGeometry));
-  if (!valid) return null;
-  const geometry =
-    (preset.level?.geometry as BoardGeometry | undefined) ?? "square";
-  const influence = preset.definition?.influence as InfluencePattern;
+  const source = value as Record<string, unknown>;
+  const definition = source.definition as Record<string, unknown> | undefined;
+  const level = source.level as Record<string, unknown> | undefined;
+  if (!definition || !level) return null;
+  const stateCount = definition?.stateCount;
+  const size = level?.size;
+  const seed = level?.seed;
+  const geometry = level.geometry;
+  const defaultInfluence = definition.defaultInfluence;
+  const compositeInfluence = definition.compositeInfluence;
+  if (
+    typeof source.id !== "string" || source.id.length === 0 ||
+    typeof source.name !== "string" ||
+    typeof source.description !== "string" ||
+    typeof stateCount !== "number" || !Number.isInteger(stateCount) || stateCount < 2 || stateCount > 5 ||
+    typeof size !== "number" || !Number.isInteger(size) || size < 2 || size > 10 ||
+    typeof seed !== "number" || !Number.isInteger(seed) || seed < 0 ||
+    !BOARD_GEOMETRIES.includes(geometry as BoardGeometry) ||
+    !isInfluencePattern(defaultInfluence) ||
+    typeof compositeInfluence !== "boolean"
+  ) return null;
+
+  const normalizedGeometry = geometry as BoardGeometry;
+  const supportedInfluences = supportedInfluencesFor(normalizedGeometry);
+  if (compositeInfluence && supportedInfluences.length < 2) return null;
+  const normalizedDefaultInfluence = supportedInfluences.includes(defaultInfluence)
+    ? defaultInfluence
+    : supportedInfluences[0] ?? "neighbors";
+
+  const initialValues = numberMap(level.initialValues, size, stateCount, false);
+  const goalValues = numberMap(level.goalValues, size, stateCount, true);
+  const rawInfluenceOverrides = influenceMap(level.influenceOverrides, size);
+  if (
+    (level.initialValues !== undefined && initialValues === undefined) ||
+    (level.goalValues !== undefined && goalValues === undefined) ||
+    (level.influenceOverrides !== undefined && rawInfluenceOverrides === undefined)
+  ) return null;
+
+  const influenceOverrides = rawInfluenceOverrides && Object.fromEntries(
+    Object.entries(rawInfluenceOverrides).filter(([, influence]) =>
+      supportedInfluences.includes(influence),
+    ),
+  ) as Record<string, InfluencePattern> | undefined;
   return {
-    ...(preset as RulePreset),
+    id: source.id,
+    name: source.name,
+    description: source.description,
     definition: {
-      ...(preset.definition as RuleDefinitionConfig),
-      influence: supportedInfluencesFor(geometry).includes(influence)
-        ? influence
-        : "neighbors",
+      stateCount,
+      defaultInfluence: normalizedDefaultInfluence,
+      compositeInfluence,
     },
     level: {
-      ...(preset.level as LevelDefaults),
-      geometry,
+      size,
+      geometry: normalizedGeometry,
+      seed,
+      initialValues: initialValues as Record<string, number> | undefined,
+      goalValues,
+      influenceOverrides,
     },
   };
 }
@@ -156,36 +245,20 @@ export function loadWorkspace(
   try {
     const raw = storage.getItem(STORAGE_KEY);
     if (!raw) throw new Error("missing workspace");
-    const stored = JSON.parse(raw) as {
-      version?: number;
-      activeRuleId?: unknown;
-      presets?: unknown[];
-    };
-    const normalizedPresets = Array.isArray(stored.presets)
-      ? stored.presets.map(normalizePreset)
-      : [];
-    if (
-      (stored.version !== 1 && stored.version !== 2) ||
-      normalizedPresets.length === 0 ||
-      normalizedPresets.some((preset) => preset === null)
-    ) {
+    const stored = JSON.parse(raw) as { version?: number; activeRuleId?: unknown; presets?: unknown[] };
+    if (stored.version !== CURRENT_WORKSPACE_VERSION || !Array.isArray(stored.presets)) {
       throw new Error("invalid workspace");
     }
-    const presets = normalizedPresets as RulePreset[];
-    if (new Set(presets.map((preset) => preset.id)).size !== presets.length) {
-      throw new Error("duplicate preset");
+    const presets: RulePreset[] = [];
+    const seenIds = new Set<string>();
+    for (const value of stored.presets) {
+      const preset = normalizePreset(value);
+      if (!preset || seenIds.has(preset.id)) continue;
+      presets.push(preset);
+      seenIds.add(preset.id);
     }
-    for (const ruleId of SHOWCASE_RULE_IDS) {
-      const builtInRule = DEFAULT_RULE_PRESETS.find(
-        (preset) => preset.id === ruleId,
-      );
-      if (builtInRule && !presets.some((preset) => preset.id === builtInRule.id)) {
-        presets.push(structuredClone(builtInRule));
-      }
-    }
-    const activeRuleId = presets.some(
-      (preset) => preset.id === stored.activeRuleId,
-    )
+    if (presets.length === 0) throw new Error("empty workspace");
+    const activeRuleId = presets.some((preset) => preset.id === stored.activeRuleId)
       ? (stored.activeRuleId as string)
       : presets[0]!.id;
     return { activeRuleId, presets };
@@ -199,11 +272,7 @@ export function saveWorkspace(
   workspace: InitialWorkspace,
   storage: Pick<Storage, "setItem"> = window.localStorage,
 ): boolean {
-  const stored: StoredWorkspace = {
-    version: 2,
-    activeRuleId: workspace.activeRuleId,
-    presets: workspace.presets,
-  };
+  const stored: StoredWorkspace = { version: CURRENT_WORKSPACE_VERSION, ...workspace };
   try {
     storage.setItem(STORAGE_KEY, JSON.stringify(stored));
     return true;
@@ -243,25 +312,50 @@ export function toExperimentConfig(preset: RulePreset): ExperimentConfig {
   return {
     size: preset.level.size,
     stateCount: preset.definition.stateCount,
-    goalValue: Math.max(
-      0,
-      Math.min(preset.definition.goalValue, preset.definition.stateCount - 1),
-    ),
-    influence: preset.definition.influence,
-    boardShape: preset.level.boardShape,
     geometry: preset.level.geometry,
+    defaultInfluence: preset.definition.defaultInfluence,
+    compositeInfluence: preset.definition.compositeInfluence,
     seed: preset.level.seed,
+    initialValues: preset.level.initialValues,
+    goalValues: preset.level.goalValues,
+    influenceOverrides: preset.definition.compositeInfluence
+      ? preset.level.influenceOverrides
+      : undefined,
+  };
+}
+
+export function withLevelDesign(preset: RulePreset, state: Readonly<GameState>): RulePreset {
+  const initialValues: Record<string, number> = {};
+  const goalValues: Record<string, number | null> = {};
+  const influenceOverrides: Record<string, InfluencePattern> = {};
+  for (const entity of Object.values(state.entities)) {
+    if (!entity.nodeId) continue;
+    initialValues[entity.nodeId] = Number(entity.channels.power ?? 0);
+    const goal = Number(entity.channels.goal ?? -1);
+    goalValues[entity.nodeId] = goal < 0 ? null : goal;
+    const influence = entity.channels.influence;
+    if (isInfluencePattern(influence) && influence !== preset.definition.defaultInfluence) {
+      influenceOverrides[entity.nodeId] = influence;
+    }
+  }
+  return {
+    ...preset,
+    level: {
+      ...preset.level,
+      initialValues,
+      goalValues,
+      influenceOverrides: preset.definition.compositeInfluence
+        ? influenceOverrides
+        : preset.level.influenceOverrides,
+    },
   };
 }
 
 export function duplicatePreset(source: RulePreset): RulePreset {
-  const suffix =
-    typeof globalThis.crypto?.randomUUID === "function"
-      ? globalThis.crypto.randomUUID()
-      : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-  return {
-    ...structuredClone(source),
-    id: `${source.id}-copy-${suffix}`,
-    name: `${source.name}副本`,
-  };
+  const suffix = typeof globalThis.crypto?.randomUUID === "function"
+    ? globalThis.crypto.randomUUID()
+    : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  return { ...structuredClone(source), id: `${source.id}-copy-${suffix}`, name: `${source.name}副本` };
 }
+
+export { INFLUENCE_PATTERNS };

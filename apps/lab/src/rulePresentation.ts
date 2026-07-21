@@ -12,6 +12,14 @@ export const influenceLabels: Record<InfluencePattern, string> = {
   "row-column": "整行整列",
 };
 
+export const influenceSymbols: Record<InfluencePattern, string> = {
+  cross: "+",
+  diagonal: "×",
+  king: "✣",
+  neighbors: "✦",
+  "row-column": "↔",
+};
+
 export const geometryNames: Record<BoardGeometry, string> = {
   square: "方形",
   hex: "六边形",

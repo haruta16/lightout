@@ -79,7 +79,7 @@ export function applyMutations(
   return { state, events };
 }
 
-export function stableStateKey(state: Readonly<GameState>): string {
+export function stableEntityStateKey(state: Readonly<GameState>): string {
   return Object.values(state.entities)
     .sort((a, b) => a.id.localeCompare(b.id))
     .map((entity) => {

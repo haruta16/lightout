@@ -4,7 +4,6 @@ import {
   registerGoal,
   registerSelector,
   registerSystem,
-  type BoardNode,
   type EntityId,
   type GameEntity,
   type MechanicRegistry,
@@ -17,10 +16,7 @@ import {
   stringArrayParam,
   stringParam,
 } from "./params";
-
-function unique<T>(items: T[]): T[] {
-  return [...new Set(items)];
-}
+import { influenceTargetsForAnchor } from "./influence";
 
 function entitiesAtNode(
   entities: Record<EntityId, GameEntity>,
@@ -66,7 +62,23 @@ export function createStandardRegistry(): MechanicRegistry {
       .filter((edge) => edge.from === anchor.nodeId && relations.has(edge.relation))
       .map((edge) => edge.to);
     if (includeSelf) nodeIds.push(anchor.nodeId);
-    return unique(entitiesAtNode(state.entities, nodeIds, kind));
+    return entitiesAtNode(state.entities, nodeIds, kind);
+  });
+
+  registerSelector(registry, "anchor-influence", ({
+    state,
+    command,
+    definition,
+  }) => {
+    const anchor = command.anchorEntityId
+      ? state.entities[command.anchorEntityId]
+      : undefined;
+    if (!anchor?.nodeId) return [];
+    const params = objectParams(definition.params);
+    const channel = stringParam(params, "channel", "influence");
+    const includeSelf = booleanParam(params, "includeSelf", true);
+    const kind = stringParam(params, "kind", anchor.kind);
+    return influenceTargetsForAnchor(state, anchor, { channel, includeSelf, kind });
   });
 
   registerEffect(registry, "cycle-channel", ({
@@ -120,6 +132,24 @@ export function createStandardRegistry(): MechanicRegistry {
     );
   });
 
+  registerGoal(registry, "channels-match", ({ state, definition }) => {
+    const params = objectParams(definition.params);
+    const kind = stringParam(params, "kind", "light");
+    const actualChannel = stringParam(params, "actualChannel", "power");
+    const targetChannel = stringParam(params, "targetChannel", "goal");
+    const ignoreValue = params.ignoreValue ?? -1;
+    const constrained = Object.values(state.entities).filter(
+      (entity) =>
+        entity.kind === kind && entity.channels[targetChannel] !== ignoreValue,
+    );
+    return (
+      constrained.length > 0 &&
+      constrained.every(
+        (entity) => entity.channels[actualChannel] === entity.channels[targetChannel],
+      )
+    );
+  });
+
   registerGoal(registry, "counter-at-least", ({ state, definition }) => {
     const params = objectParams(definition.params);
     const counter = stringParam(params, "counter", "score");
@@ -130,45 +160,49 @@ export function createStandardRegistry(): MechanicRegistry {
   registerSystem(registry, "gravity-down", ({ state, definition }) => {
     const params = objectParams(definition.params);
     const kind = stringParam(params, "kind", "light");
+    const relation = stringParam(params, "relation", "down");
     const occupied = new Set(
       Object.values(state.entities)
         .filter((entity) => entity.nodeId)
         .map((entity) => entity.nodeId as string),
     );
-    const nodesByColumn = new Map<number, BoardNode[]>();
-    for (const node of Object.values(state.board.nodes)) {
-      const column = nodesByColumn.get(node.position.x) ?? [];
-      column.push(node);
-      nodesByColumn.set(node.position.x, column);
+    const destinationByNode = new Map<string, string>();
+    for (const edge of state.board.edges) {
+      if (edge.relation === relation && !destinationByNode.has(edge.from)) {
+        destinationByNode.set(edge.from, edge.to);
+      }
     }
-    for (const nodes of nodesByColumn.values()) {
-      nodes.sort((a, b) => a.position.y - b.position.y || a.id.localeCompare(b.id));
-    }
+    const fallDepth = (start: string): number => {
+      const visited = new Set<string>();
+      let current = start;
+      let depth = 0;
+      while (!visited.has(current)) {
+        visited.add(current);
+        const destination = destinationByNode.get(current);
+        if (!destination) break;
+        current = destination;
+        depth += 1;
+      }
+      return depth;
+    };
     const fallingEntities = Object.values(state.entities)
       .filter((entity) => entity.kind === kind && entity.nodeId)
       .sort((a, b) => {
-        const first = a.nodeId ? state.board.nodes[a.nodeId] : undefined;
-        const second = b.nodeId ? state.board.nodes[b.nodeId] : undefined;
-        return (
-          (second?.position.y ?? 0) - (first?.position.y ?? 0) ||
-          a.id.localeCompare(b.id)
-        );
+        const firstDepth = a.nodeId ? fallDepth(a.nodeId) : 0;
+        const secondDepth = b.nodeId ? fallDepth(b.nodeId) : 0;
+        return firstDepth - secondDepth || a.id.localeCompare(b.id);
       });
     const mutations: StateMutation[] = [];
     for (const entity of fallingEntities) {
       if (!entity.nodeId) continue;
-      const current = state.board.nodes[entity.nodeId];
-      if (!current) continue;
-      const column = nodesByColumn.get(current.position.x);
-      const currentIndex = column?.findIndex((node) => node.id === current.id) ?? -1;
-      const destination = currentIndex >= 0 ? column?.[currentIndex + 1] : undefined;
-      if (!destination || occupied.has(destination.id)) continue;
+      const destination = destinationByNode.get(entity.nodeId);
+      if (!destination || occupied.has(destination)) continue;
       occupied.delete(entity.nodeId);
-      occupied.add(destination.id);
+      occupied.add(destination);
       mutations.push({
         type: "move-entity",
         entityId: entity.id,
-        toNodeId: destination.id,
+        toNodeId: destination,
       });
     }
     return mutations;

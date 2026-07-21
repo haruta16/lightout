@@ -36,7 +36,12 @@ export function solvePuzzle(
   mechanics: MechanicRegistry,
   solvers: SolverRegistry = createDefaultSolverRegistry(),
 ): SolveResult {
-  const context = { state, ruleset, registry: mechanics };
+  const context = {
+    state,
+    ruleset,
+    registry: mechanics,
+    analysisCache: new Map<string, unknown>(),
+  };
   const reasons: string[] = [];
   for (const solver of solvers.solvers) {
     const support = solver.supports(context);
