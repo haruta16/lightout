@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@lightout/engine": "workspace:*",
+    "@lightout/generator": "workspace:*",
     "@lightout/mechanics-standard": "workspace:*",
     "@lightout/solver": "workspace:*",
     "react": "^19.0.0",

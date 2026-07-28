@@ -32,7 +32,7 @@ function resultFromLinearSolution(
     };
   }
 
-  const presses = model.entityIds.flatMap((entityId, column) =>
+  const presses = model.anchorEntityIds.flatMap((entityId, column) =>
     Array<string>(solution.values[column] ?? 0).fill(entityId),
   );
   if (
@@ -128,19 +128,7 @@ export const moduloFourSolver: PuzzleSolver = {
         analysis.model.modulus,
       );
     }
-    const columnCount = analysis.model.entityIds.length;
-    const squareMatrix = [
-      ...analysis.model.matrix.map((row) => [...row]),
-      ...Array.from(
-        { length: Math.max(0, columnCount - analysis.model.matrix.length) },
-        () => Array<number>(columnCount).fill(0),
-      ),
-    ];
-    const squareTarget = [
-      ...analysis.model.target,
-      ...Array<number>(Math.max(0, columnCount - analysis.model.target.length)).fill(0),
-    ];
-    const solution = solveModuloFour(squareMatrix, squareTarget);
+    const solution = solveModuloFour(analysis.model.matrix, analysis.model.target);
     return resultFromLinearSolution(analysis.model, solution, this);
   },
 };

@@ -30,6 +30,7 @@ export interface GameEntity {
   kind: string;
   nodeId?: NodeId;
   tags: string[];
+  properties: Record<string, JsonValue>;
   channels: Record<string, JsonPrimitive>;
 }
 
@@ -74,8 +75,11 @@ export type ChannelSchema =
   | { type: "boolean" };
 
 export interface EntityKindSchema {
-  requiredChannels: Record<string, ChannelSchema>;
+  requiredProperties?: Record<string, ChannelSchema>;
+  requiredChannels?: Record<string, ChannelSchema>;
+  optionalChannels?: Record<string, ChannelSchema>;
   allowAdditionalChannels?: boolean;
+  allowAdditionalProperties?: boolean;
 }
 
 export interface Ruleset {

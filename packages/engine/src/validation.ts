@@ -29,7 +29,26 @@ function validateEntity(
   const schema = ruleset.entityKinds?.[entity.kind];
   if (!schema) return [`Entity ${entity.id} has unregistered kind: ${entity.kind}`];
   const errors: string[] = [];
-  for (const [channel, channelSchema] of Object.entries(schema.requiredChannels)) {
+  const requiredProperties = schema.requiredProperties ?? {};
+  const requiredChannels = schema.requiredChannels ?? {};
+  const optionalChannels = schema.optionalChannels ?? {};
+  for (const [property, propertySchema] of Object.entries(requiredProperties)) {
+    if (!(property in entity.properties)) {
+      errors.push(`Entity ${entity.id} is missing property: ${property}`);
+      continue;
+    }
+    if (!channelIsValid(entity.properties[property], propertySchema)) {
+      errors.push(`Entity ${entity.id} has invalid property value: ${property}`);
+    }
+  }
+  if (!schema.allowAdditionalProperties) {
+    for (const property of Object.keys(entity.properties)) {
+      if (!(property in requiredProperties)) {
+        errors.push(`Entity ${entity.id} has undeclared property: ${property}`);
+      }
+    }
+  }
+  for (const [channel, channelSchema] of Object.entries(requiredChannels)) {
     if (!(channel in entity.channels)) {
       errors.push(`Entity ${entity.id} is missing channel: ${channel}`);
       continue;
@@ -38,9 +57,14 @@ function validateEntity(
       errors.push(`Entity ${entity.id} has invalid channel value: ${channel}`);
     }
   }
+  for (const [channel, channelSchema] of Object.entries(optionalChannels)) {
+    if (channel in entity.channels && !channelIsValid(entity.channels[channel], channelSchema)) {
+      errors.push(`Entity ${entity.id} has invalid channel value: ${channel}`);
+    }
+  }
   if (!schema.allowAdditionalChannels) {
     for (const channel of Object.keys(entity.channels)) {
-      if (!(channel in schema.requiredChannels)) {
+      if (!(channel in requiredChannels) && !(channel in optionalChannels)) {
         errors.push(`Entity ${entity.id} has undeclared channel: ${channel}`);
       }
     }

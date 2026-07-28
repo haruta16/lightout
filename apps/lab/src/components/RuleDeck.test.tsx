@@ -21,12 +21,12 @@ function renderPreset(index: number): string {
 }
 
 describe("RuleDeck influence capabilities", () => {
-  it("offers composite influence when a topology has multiple base influences", () => {
-    expect(renderPreset(0)).toContain('<option value="composite">复合影响</option>');
+  it("offers per-cell influence when a topology has multiple profiles", () => {
+    expect(renderPreset(0)).toContain('<option value="per-cell">逐格影响</option>');
   });
 
-  it("does not offer a meaningless composite mode for hex topology", () => {
-    const hexIndex = DEFAULT_RULE_PRESETS.findIndex((preset) => preset.level.geometry === "hex");
-    expect(renderPreset(hexIndex)).not.toContain('<option value="composite">复合影响</option>');
+  it("does not offer a meaningless per-cell mode for hex topology", () => {
+    const hexIndex = DEFAULT_RULE_PRESETS.findIndex((preset) => preset.game.design.board.geometry === "hex");
+    expect(renderPreset(hexIndex)).not.toContain('<option value="per-cell">逐格影响</option>');
   });
 });

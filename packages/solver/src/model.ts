@@ -3,7 +3,7 @@ import type { SolverContext } from "./types";
 
 export interface AdditiveRuleModel {
   modulus: number;
-  entityIds: string[];
+  anchorEntityIds: string[];
   matrix: number[][];
   target: number[];
 }
@@ -46,11 +46,6 @@ export function analyzeAdditiveRule(context: SolverContext): RuleAnalysis {
       reason: "Linear solver only supports state-independent standard selectors",
     });
   }
-  const selectorParams = paramsOf(action.selector.params);
-  if (selectorParams.kind !== undefined && selectorParams.kind !== "light") {
-    return finish({ supported: false, reason: "Linear solver requires light targets" });
-  }
-
   if (action.effects.length !== 1 || action.effects[0]?.type !== "cycle-channel") {
     return finish({
       supported: false,
@@ -86,32 +81,20 @@ export function analyzeAdditiveRule(context: SolverContext): RuleAnalysis {
   if ((ruleset.lossConditions?.length ?? 0) > 0) {
     return finish({ supported: false, reason: "Linear solver does not support loss conditions" });
   }
-  if (ruleset.goals.length !== 1 || ruleset.goals[0]?.type !== "channels-match") {
+  if (ruleset.goals.length !== 1 || ruleset.goals[0]?.type !== "channel-targets-match") {
     return finish({
       supported: false,
-      reason: "Linear solver requires one channels-match goal",
+      reason: "Linear solver requires one channel-targets-match goal",
     });
   }
   const goalParams = paramsOf(ruleset.goals[0].params);
-  const goalKind = typeof goalParams.kind === "string" ? goalParams.kind : "light";
-  const actualChannel = typeof goalParams.actualChannel === "string"
-    ? goalParams.actualChannel
-    : "power";
-  const targetChannel = typeof goalParams.targetChannel === "string"
-    ? goalParams.targetChannel
-    : "goal";
-  const ignoreValue = goalParams.ignoreValue ?? -1;
-  if (
-    goalKind !== "light" ||
-    actualChannel !== "power" ||
-    targetChannel !== "goal" ||
-    typeof ignoreValue !== "number"
-  ) {
-    return finish({ supported: false, reason: "Linear solver requires light power-to-goal constraints" });
+  const goalChannel = typeof goalParams.channel === "string" ? goalParams.channel : "power";
+  const goalTargets = paramsOf(goalParams.targets ?? {});
+  if (goalChannel !== "power") {
+    return finish({ supported: false, reason: "Linear solver requires power target constraints" });
   }
 
   const entities = Object.values(state.entities)
-    .filter((entity) => entity.kind === "light")
     .sort((first, second) => {
       const a = first.nodeId ? state.board.nodes[first.nodeId] : undefined;
       const b = second.nodeId ? state.board.nodes[second.nodeId] : undefined;
@@ -121,29 +104,39 @@ export function analyzeAdditiveRule(context: SolverContext): RuleAnalysis {
         first.id.localeCompare(second.id)
       );
     });
-  if (entities.length === 0) {
-    return finish({ supported: false, reason: "Linear solver requires at least one light entity" });
+  const powerEntities = entities.filter((entity) => entity.properties.hasPower === true);
+  const anchors = entities.filter((entity) => entity.properties.activatable === true);
+  if (powerEntities.length === 0 || anchors.length === 0) {
+    return finish({ supported: false, reason: "Linear solver requires power cells and activatable cells" });
   }
-  for (const entity of entities) {
+  for (const entity of powerEntities) {
     const power = entity.channels.power;
     if (typeof power !== "number" || !Number.isInteger(power) || power < 0 || power >= modulus) {
       return finish({ supported: false, reason: `Entity ${entity.id} has invalid power` });
     }
-    const goal = entity.channels.goal;
-    if (
-      goal !== ignoreValue &&
-      (typeof goal !== "number" || !Number.isInteger(goal) || goal < 0 || goal >= modulus)
-    ) {
-      return finish({ supported: false, reason: `Entity ${entity.id} has invalid goal` });
-    }
   }
 
-  const entityIds = entities.map((entity) => entity.id);
-  const index = new Map(entityIds.map((id, position) => [id, position]));
-  const fullMatrix = Array.from({ length: entityIds.length }, () =>
-    Array<number>(entityIds.length).fill(0),
+  const constrained = powerEntities.flatMap((entity) => {
+    const goal = goalTargets[entity.id];
+    if (goal === undefined) return [];
+    if (typeof goal !== "number" || !Number.isInteger(goal) || goal < 0 || goal >= modulus) {
+      return [{ entity, goal: Number.NaN }];
+    }
+    return [{ entity, goal }];
+  });
+  if (constrained.some(({ goal }) => Number.isNaN(goal))) {
+    return finish({ supported: false, reason: "Linear solver found an invalid goal target" });
+  }
+  if (constrained.length === 0) {
+    return finish({ supported: false, reason: "Linear solver requires at least one goal constraint" });
+  }
+
+  const anchorEntityIds = anchors.map((entity) => entity.id);
+  const rowByEntityId = new Map(constrained.map(({ entity }, row) => [entity.id, row]));
+  const matrix = Array.from({ length: constrained.length }, () =>
+    Array<number>(anchorEntityIds.length).fill(0),
   );
-  entityIds.forEach((anchorEntityId, column) => {
+  anchorEntityIds.forEach((anchorEntityId, column) => {
     const targets = getCommandTargets(
       state,
       { type: "activate", anchorEntityId },
@@ -151,25 +144,18 @@ export function analyzeAdditiveRule(context: SolverContext): RuleAnalysis {
       registry,
     );
     for (const targetId of targets) {
-      const row = index.get(targetId);
-      if (row !== undefined && fullMatrix[row]) {
-        fullMatrix[row][column] = modulo((fullMatrix[row][column] ?? 0) + step, modulus);
+      const row = rowByEntityId.get(targetId);
+      if (row !== undefined && matrix[row]) {
+        matrix[row][column] = modulo((matrix[row][column] ?? 0) + step, modulus);
       }
     }
   });
-  const constrainedIndexes = entities
-    .map((entity, position) => ({ entity, position }))
-    .filter(({ entity }) => entity.channels.goal !== ignoreValue);
-  if (constrainedIndexes.length === 0) {
-    return finish({ supported: false, reason: "Linear solver requires at least one goal constraint" });
-  }
-  const matrix = constrainedIndexes.map(({ position }) => fullMatrix[position] ?? []);
-  const target = constrainedIndexes.map(({ entity }) =>
-    modulo(Number(entity.channels.goal) - Number(entity.channels.power), modulus),
+  const target = constrained.map(({ entity, goal }) =>
+    modulo(goal - Number(entity.channels.power), modulus),
   );
 
   return finish({
     supported: true,
-    model: { modulus, entityIds, matrix, target },
+    model: { modulus, anchorEntityIds, matrix, target },
   });
 }

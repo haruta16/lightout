@@ -1,0 +1,16 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "noEmit": false,
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "outDir": "dist"
+  },
+  "references": [
+    { "path": "../engine" },
+    { "path": "../mechanics-standard" },
+    { "path": "../solver" }
+  ],
+  "include": ["src", "tests"]
+}

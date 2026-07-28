@@ -1,8 +1,21 @@
 import {
   getBoardGeometryDefinition,
   type BoardGeometry,
+  type CellRole,
   type InfluencePattern,
 } from "@lightout/mechanics-standard";
+
+export const cellRoleLabels: Record<CellRole, string> = {
+  standard: "普通格",
+  switch: "纯开关",
+  lamp: "被动灯",
+};
+
+export const cellRoleSymbols: Record<CellRole, string> = {
+  standard: "◉",
+  switch: "⌁",
+  lamp: "●",
+};
 
 export const influenceLabels: Record<InfluencePattern, string> = {
   cross: "十字相邻",

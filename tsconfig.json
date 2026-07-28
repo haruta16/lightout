@@ -4,6 +4,7 @@
     { "path": "./packages/engine" },
     { "path": "./packages/mechanics-standard" },
     { "path": "./packages/solver" },
+    { "path": "./packages/generator" },
     { "path": "./apps/lab" }
   ]
 }

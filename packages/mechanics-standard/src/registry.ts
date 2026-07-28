@@ -68,17 +68,12 @@ export function createStandardRegistry(): MechanicRegistry {
   registerSelector(registry, "anchor-influence", ({
     state,
     command,
-    definition,
   }) => {
     const anchor = command.anchorEntityId
       ? state.entities[command.anchorEntityId]
       : undefined;
     if (!anchor?.nodeId) return [];
-    const params = objectParams(definition.params);
-    const channel = stringParam(params, "channel", "influence");
-    const includeSelf = booleanParam(params, "includeSelf", true);
-    const kind = stringParam(params, "kind", anchor.kind);
-    return influenceTargetsForAnchor(state, anchor, { channel, includeSelf, kind });
+    return influenceTargetsForAnchor(state, anchor);
   });
 
   registerEffect(registry, "cycle-channel", ({
@@ -90,11 +85,12 @@ export function createStandardRegistry(): MechanicRegistry {
     const channel = stringParam(params, "channel", "power");
     const modulo = Math.max(2, Math.floor(numberParam(params, "modulo", 2)));
     const step = Math.floor(numberParam(params, "step", 1));
-    return targetEntityIds.map<StateMutation>((entityId) => {
+    return targetEntityIds.flatMap<StateMutation>((entityId) => {
       const entity = state.entities[entityId];
-      const current = Number(entity?.channels[channel] ?? 0);
+      if (!entity || typeof entity.channels[channel] !== "number") return [];
+      const current = entity.channels[channel];
       const value = ((current + step) % modulo + modulo) % modulo;
-      return { type: "set-channel", entityId, channel, value };
+      return [{ type: "set-channel", entityId, channel, value }];
     });
   });
 
@@ -147,6 +143,16 @@ export function createStandardRegistry(): MechanicRegistry {
       constrained.every(
         (entity) => entity.channels[actualChannel] === entity.channels[targetChannel],
       )
+    );
+  });
+
+  registerGoal(registry, "channel-targets-match", ({ state, definition }) => {
+    const params = objectParams(definition.params);
+    const channel = stringParam(params, "channel", "power");
+    const targets = objectParams(params.targets ?? {});
+    const entries = Object.entries(targets);
+    return entries.length > 0 && entries.every(([entityId, target]) =>
+      state.entities[entityId]?.channels[channel] === target,
     );
   });
 
